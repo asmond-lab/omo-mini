@@ -1,0 +1,8 @@
+omo-mini read-only local mode. /paste reads clipboard; /quit exits. Each task starts fresh.
+omo-mini>Find invoiceTotal with tools; cite its exact expression. Labels: 猫
+BLUE CAT 17
+**File:** `src\ledger.ts` **Line:** 2**Exact Expression:**
+```typescript
+return base + handling;
+```The `invoiceTotal` function (lines 1-3) simply sums the two input parameters: `base` and `handling`.
+omo-mini> /quit

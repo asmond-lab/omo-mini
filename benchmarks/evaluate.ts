@@ -10,13 +10,14 @@ const oracle = JSON.parse(await readFile(join(source, "oracle/answers.json"), "u
 }>;
 const root = await mkdtemp(join(tmpdir(), "omo-mini-public-eval-"));
 const fixture = join(root, "fixture");
-const reportPath = resolve(import.meta.dir, "../docs/evidence/performance.json");
+const finalBaseline = process.argv.slice(2).includes("--final-baseline");
+const reportPath = resolve(import.meta.dir, finalBaseline ? "../docs/evidence/performance-final.json" : "../docs/evidence/performance.json");
 try {
   await cp(join(source, tasks.fixture_root), fixture, { recursive: true });
   const png = Buffer.from((await readFile(join(fixture, "assets/status.png.b64"), "utf8")).trim(), "base64");
   await writeFile(join(fixture, "assets/status.png"), png);
   const report: { version: string; fixture: string; runs: object[] } = { version: "0.1.0", fixture: "public Tidewatch (11 file questions + 1 image attachment)", runs: [] };
-  for (const strategy of ["baseline", "grounded"] as const) {
+  for (const strategy of (finalBaseline ? ["baseline"] : ["baseline", "grounded"] as const)) {
     const results = [];
     for (const item of tasks.tasks) {
       const args = ["dist/cli.js", "run", "--root", fixture, "--task", item.id === "T12" ?
