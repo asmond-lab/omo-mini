@@ -8,7 +8,7 @@ import { text } from "node:stream/consumers";
 import { discover, MiniError } from "./local.ts";
 import { parseArgs, prepareProfile, upstreamEntry } from "./profile.ts";
 
-const HELP = `omo-mini 0.2.1 - independent local profile of OmO Native
+const HELP = `omo-mini 0.2.2 - independent local profile of OmO Native
 Usage: omo-mini [--root PATH] [--state-dir PATH] [--model ID] [--base-url URL] [--permission workspace|ask|read-only]
        omo-mini run --root PATH --task TEXT [--image PATH] [--session NAME] [--json] [profile options]
        omo-mini doctor [--json] [profile options]

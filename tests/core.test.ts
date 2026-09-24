@@ -103,7 +103,7 @@ test("multiline Unicode paste retains line breaks as one task", () => {
 test("real CLI entry prints help and exits nonzero for invalid flags", () => {
   const help = Bun.spawnSync([process.execPath, "src/cli.ts", "--help"], { cwd: join(import.meta.dir, "..") });
   expect(help.exitCode).toBe(0);
-  expect(new TextDecoder().decode(help.stdout)).toContain("omo-mini 0.2.1");
+  expect(new TextDecoder().decode(help.stdout)).toContain("omo-mini 0.2.2");
   const invalid = Bun.spawnSync([process.execPath, "src/cli.ts", "run", "--root", ".", "--json"], { cwd: join(import.meta.dir, "..") });
   expect(invalid.exitCode).toBe(1);
   expect(JSON.parse(new TextDecoder().decode(invalid.stdout)).error.code).toBe("arguments");
