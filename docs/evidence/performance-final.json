@@ -1,0 +1,304 @@
+{
+  "version": "0.1.0",
+  "fixture": "public Tidewatch (11 file questions + 1 image attachment)",
+  "runs": [
+    {
+      "strategy": "baseline",
+      "results": [
+        {
+          "id": "T01",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "The active Tidewatch deployment listens on **port 4182**.\n\nSource: `config\\runtime.toml:4` - `port = 4182`",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 2,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1678,
+            2952,
+            4284
+          ],
+          "usage": {
+            "input": 1824,
+            "output": 252
+          },
+          "elapsedMs": 3689
+        },
+        {
+          "id": "T02",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file contents:\n\n| Configuration | File | Bind Address |\n|--------------|------|--------------|\n| **Active** | `config/runtime.toml` (line 3) | `\"127.0.0.1\"` |\n| **Sample** | `config/runtime.sample.toml` (line 3) | `\"0.0.0.0\"` |\n\nThe runbook confirms that the active configuration is `config/runtime.toml`, while the sample file (`config/runtime.sample.toml`) contains example settings not loaded by the active deployment.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1687,
+            3567,
+            6028,
+            8154
+          ],
+          "usage": {
+            "input": 3572,
+            "output": 654
+          },
+          "elapsedMs": 8739
+        },
+        {
+          "id": "T03",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files, here's what the active dispatcher uses for a **critical** alert with the configured delivery channel:\n\n| Setting | Value | Source |\n|---------|-------|--------|\n| **Channel** | `slack` | config/runtime.toml:11 |\n| **Destination** | `#tide-critical` | src/channels.py:3 |\n\nThe active dispatcher (`src/dispatcher.py`, referenced in config/runtime.toml:8) calls `resolve_channel()` which maps the `\"critical\"` severity to the Slack channel `#tide-critical`.",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 4,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 8,
+          "requestBytes": [
+            1741,
+            3150,
+            4191,
+            5508,
+            6886,
+            8412,
+            9745,
+            11045
+          ],
+          "usage": {
+            "input": 7990,
+            "output": 842
+          },
+          "elapsedMs": 10950
+        },
+        {
+          "id": "T04",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n**Station ST-03:**\n- **River:** Cedar (from `data\\stations.csv` line 4)\n- **Region's Alert Threshold:** 180 cm (from `config\\alerts.toml` lines 2-3, which shows `[regions.north] threshold_cm = 180`)",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 5,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            1716,
+            2851,
+            4094,
+            5352,
+            6499,
+            7737
+          ],
+          "usage": {
+            "input": 4940,
+            "output": 590
+          },
+          "elapsedMs": 7852
+        },
+        {
+          "id": "T05",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n**Station ST-02:**\n- **River:** Brook (from `data\\stations.csv` line 3)\n- **Region Threshold:** 240 cm (from `config\\alerts.toml` lines 6-8, under `[regions.south]`)\n- **Severity:** warning (from `config\\alerts.toml` line 8)",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 3,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1705,
+            2840,
+            4126,
+            5439,
+            6682
+          ],
+          "usage": {
+            "input": 3839,
+            "output": 586
+          },
+          "elapsedMs": 8005
+        },
+        {
+          "id": "T06",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n| Setting | Value | Source |\n|---------|-------|--------|\n| **Active storage retention days** | 14 | `src/storage.py:3` (`RETENTION_DAYS = 14`) |\n| **Retired prototype retention days** | 90 | `archive/runtime.toml:8` (`retention_days = 90`) |",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 9,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            1718,
+            3563,
+            5642,
+            6937,
+            8355,
+            10143
+          ],
+          "usage": {
+            "input": 5854,
+            "output": 591
+          },
+          "elapsedMs": 7914
+        },
+        {
+          "id": "T07",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "**Active scheduler selection:**\nThe active scheduler selects **`src/dispatcher.py`** (config/runtime.toml:8).\n\n**Delivery count differences for nonempty events:**\n\n| Dispatcher | Delivery Count Behavior |\n|------------|------------------------|\n| **Active** (`src/dispatcher.py`:10-12) | Returns `len(events)` — one delivery per event |\n| **Archived** (`archive/dispatcher.py`:4-6) | Returns `1` — batches all events into a single delivery |\n\n**Difference:** For nonempty events, the active dispatcher's count equals the number of events in the batch (e.g., 5 events = 5 deliveries), while the archived dispatcher always returns **1** regardless of batch size.",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 3,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1761,
+            4136,
+            6784,
+            8576
+          ],
+          "usage": {
+            "input": 3951,
+            "output": 873
+          },
+          "elapsedMs": 11345
+        },
+        {
+          "id": "T08",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on `src/routes.py:5`, the stations summary route (`/stations/summary`) requires:\n\n- **HTTP Method:** `GET`\n- **Role:** `analyst`",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1686,
+            3003,
+            4149,
+            5607
+          ],
+          "usage": {
+            "input": 2670,
+            "output": 324
+          },
+          "elapsedMs": 4413
+        },
+        {
+          "id": "T09",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on scanning **13 files** with coverage marked as complete for eligible files:\n\n| Search Term | Matches Found |\n|-------------|---------------|\n| `PagerDuty` | 0 |\n| `integration_key` | 0 |\n| `pagerduty` | 0 |\n| `PD_` | 0 |\n\n**Conclusion:** No PagerDuty integration key was found in the scanned scope. The 13 inspected files contain no evidence of PagerDuty configuration or keys.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1733,
+            3070,
+            4321,
+            5466,
+            7124
+          ],
+          "usage": {
+            "input": 3164,
+            "output": 542
+          },
+          "elapsedMs": 7681
+        },
+        {
+          "id": "T10",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on **docs\\runbook.md**:\n\n| Question | Answer | Citation |\n|----------|--------|----------|\n| On-call escalation email | `harbor-desk@tidewatch.example` | docs\\runbook.md:6 |\n| Command to inspect ST-01 snapshot | `twctl snapshot show ST-01` | docs\\runbook.md:7 |",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 5,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1706,
+            3455,
+            5120,
+            6529
+          ],
+          "usage": {
+            "input": 3108,
+            "output": 388
+          },
+          "elapsedMs": 5610
+        },
+        {
+          "id": "T11",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Is export enabled?** No, it's disabled.\n- **File:** `config/runtime.toml:12` - `export_enabled = false`\n\n**Export route specification:**\n- **Method:** POST\n- **Role:** operator\n- **File:** `src/routes.py:6` - `(\"POST\", \"/stations/export\", \"operator\")`",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1719,
+            2979,
+            4253,
+            5618
+          ],
+          "usage": {
+            "input": 2751,
+            "output": 359
+          },
+          "elapsedMs": 5483
+        },
+        {
+          "id": "T12",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the visual content of the image:\n\n*   The **top-left** pixel (or square) is **red**.\n*   The **top-right** pixel (or square) is **blue**.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 0,
+          "invalidCalls": 0,
+          "requests": 1,
+          "requestBytes": [
+            1967
+          ],
+          "usage": {
+            "input": 466,
+            "output": 442
+          },
+          "elapsedMs": 6214
+        }
+      ],
+      "summary": {
+        "correct": 12,
+        "citationSpans": 11,
+        "expectedCitationSpans": 22,
+        "validCalls": 56,
+        "invalidCalls": 0,
+        "elapsedMs": 87895,
+        "requestBytes": 255189,
+        "providerInput": 44129,
+        "providerOutput": 6443
+      }
+    }
+  ]
+}

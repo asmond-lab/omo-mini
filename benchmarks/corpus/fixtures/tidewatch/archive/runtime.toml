@@ -1,0 +1,8 @@
+# Retired prototype; do not use for current settings.
+[server]
+bind = "0.0.0.0"
+port = 3111
+
+[scheduler]
+poll_seconds = 5
+retention_days = 90

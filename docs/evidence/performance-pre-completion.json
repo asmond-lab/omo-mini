@@ -1,0 +1,306 @@
+{
+  "version": "0.1.0",
+  "fixture": "public Tidewatch (11 file questions + 1 image attachment)",
+  "runs": [
+    {
+      "strategy": "baseline",
+      "results": [
+        {
+          "id": "T01",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "The active Tidewatch deployment listens on **port 4182**.\n\nSource: `config\\runtime.toml:4` shows `port = 4182` under the `[server]` section of the active deployment settings.",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 2,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1678,
+            2951,
+            4239
+          ],
+          "usage": {
+            "input": 1814,
+            "output": 257
+          },
+          "elapsedMs": 3358
+        },
+        {
+          "id": "T02",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file contents:\n\n- **Active server bind address**: `\"127.0.0.1\"` (from `config/runtime.toml:3`)\n- **Sample server bind address**: `\"0.0.0.0\"` (from `config/runtime.sample.toml:3`)",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1687,
+            3575,
+            6036,
+            8262
+          ],
+          "usage": {
+            "input": 3596,
+            "output": 642
+          },
+          "elapsedMs": 8486
+        },
+        {
+          "id": "T03",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Channel:** `slack` (from `config/runtime.toml:11`)\n\n**Destination:** `#tide-critical` (from `src/channels.py:3`, in the `SLACK_DESTINATIONS` mapping for severity \"critical\")\n\nThe active dispatcher (`src/dispatcher.py:8`) uses `resolve_channel()` which maps the configured channel (\"slack\") and severity (\"critical\") to the destination `\"#tide-critical\"`.",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 4,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 8,
+          "requestBytes": [
+            1741,
+            3151,
+            4194,
+            5455,
+            6751,
+            8235,
+            9510,
+            10896
+          ],
+          "usage": {
+            "input": 7806,
+            "output": 768
+          },
+          "elapsedMs": 10257
+        },
+        {
+          "id": "T04",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n**River:** From `data\\stations.csv` line 4, station **ST-03 is on the Cedar river**.\n\n**Region Alert Threshold:** From `config\\alerts.toml` lines 2-3, the north region's alert threshold is **180 centimeters**.\n\nSince ST-03 is in the north region (per stations.csv), its region's alert threshold is **180 cm**.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 5,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            1716,
+            2935,
+            4191,
+            5477,
+            6765,
+            8002
+          ],
+          "usage": {
+            "input": 5084,
+            "output": 632
+          },
+          "elapsedMs": 8447
+        },
+        {
+          "id": "T05",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n**Station ST-02:**\n- **River:** Brook (from `data\\stations.csv:3`)\n- **Region Threshold:** 240 cm (from `config\\alerts.toml:7` - south region threshold)\n- **Severity:** warning (from `config\\alerts.toml:8` - south region severity)",
+          "correct": true,
+          "citations": 3,
+          "expectedCitations": 3,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1705,
+            2838,
+            4047,
+            5264,
+            6466
+          ],
+          "usage": {
+            "input": 3704,
+            "output": 523
+          },
+          "elapsedMs": 6950
+        },
+        {
+          "id": "T06",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file inspection:\n\n| Setting | Value | Source |\n|---------|-------|--------|\n| **Active storage retention days** | 14 | `src/storage.py`:3 (`RETENTION_DAYS = 14`) |\n| **Retired prototype retention days** | 90 | `archive/runtime.toml`:8 (`retention_days = 90`) |",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 9,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            1718,
+            3583,
+            5660,
+            6956,
+            8375,
+            10221
+          ],
+          "usage": {
+            "input": 5883,
+            "output": 608
+          },
+          "elapsedMs": 8304
+        },
+        {
+          "id": "T07",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration and code files:\n\n**Active Scheduler Selection:**\nFrom `config/runtime.toml` (line 8), the active scheduler selects **`src/dispatcher.py`**.\n\n**Delivery Count Difference for Nonempty Events:**\n\n| Dispatcher | Delivery Count Behavior (nonempty events) |\n|------------|------------------------------------------|\n| **Active** (`src/dispatcher.py`, lines 10-12) | `len(events)` — one delivery per event |\n| **Archived** (`archive/dispatcher.py`, lines 5-6) | `1` — all events batched into single delivery |\n\nFor nonempty events, the active dispatcher returns a count equal to the number of events (one delivery each), while the archived prototype always returns `1` regardless of event volume (batching them together).",
+          "correct": false,
+          "citations": 0,
+          "expectedCitations": 3,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1761,
+            4135,
+            6729,
+            8174
+          ],
+          "usage": {
+            "input": 3813,
+            "output": 737
+          },
+          "elapsedMs": 9825
+        },
+        {
+          "id": "T08",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on `src/routes.py:5`, the stations summary route (`/stations/summary`) requires:\n\n- **HTTP Method:** `GET`\n- **Role:** `analyst`",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1686,
+            3003,
+            4179,
+            5580
+          ],
+          "usage": {
+            "input": 2666,
+            "output": 313
+          },
+          "elapsedMs": 4479
+        },
+        {
+          "id": "T09",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on scanning 13 files with complete coverage, no PagerDuty integration key was found in this project. The following searches returned no matches:\n- `PagerDuty` (literal)\n- `integration_key` (literal)\n- `pd_` (prefix pattern)\n- `PAGERDUTY` (uppercase literal)\n\n**Status:** Not found in scanned scope.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1733,
+            3070,
+            4320,
+            5505,
+            7149
+          ],
+          "usage": {
+            "input": 3175,
+            "output": 509
+          },
+          "elapsedMs": 7123
+        },
+        {
+          "id": "T10",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n1. **On-call escalation email**: `harbor-desk@tidewatch.example` (from `docs\\runbook.md:6`)\n\n2. **Command to inspect ST-01 snapshot**: `twctl snapshot show ST-01` (from `docs\\runbook.md:7`)",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1706,
+            3455,
+            4495
+          ],
+          "usage": {
+            "input": 1888,
+            "output": 288
+          },
+          "elapsedMs": 4014
+        },
+        {
+          "id": "T11",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Is export enabled?** No - `export_enabled = false` in **config/runtime.toml:12**.\n\n**Export route specification:** The export route is defined as:\n- **Method:** POST\n- **Role:** operator\n- **Path:** `/stations/export` (from **src/routes.py:6**)",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 2,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1719,
+            2940,
+            4177
+          ],
+          "usage": {
+            "input": 1767,
+            "output": 280
+          },
+          "elapsedMs": 3832
+        },
+        {
+          "id": "T12",
+          "exit": 1,
+          "reason": "length",
+          "answer": "",
+          "correct": false,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 3,
+          "invalidCalls": 1,
+          "requests": 5,
+          "requestBytes": [
+            1897,
+            4571,
+            5985,
+            7454,
+            8630
+          ],
+          "usage": {
+            "input": 5330,
+            "output": 1845
+          },
+          "elapsedMs": 24709
+        }
+      ],
+      "summary": {
+        "correct": 10,
+        "citationSpans": 13,
+        "expectedCitationSpans": 22,
+        "validCalls": 56,
+        "invalidCalls": 1,
+        "elapsedMs": 99784,
+        "requestBytes": 268333,
+        "providerInput": 46526,
+        "providerOutput": 7402
+      }
+    }
+  ]
+}

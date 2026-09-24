@@ -1,0 +1,81 @@
+{
+  "T01": {
+    "values": ["4182"],
+    "citations": [{"path": "config/runtime.toml", "start": 4, "end": 4, "contains": "port = 4182"}]
+  },
+  "T02": {
+    "values": ["127.0.0.1", "0.0.0.0"],
+    "citations": [
+      {"path": "config/runtime.toml", "start": 3, "end": 3, "contains": "bind = \"127.0.0.1\""},
+      {"path": "config/runtime.sample.toml", "start": 3, "end": 3, "contains": "bind = \"0.0.0.0\""}
+    ]
+  },
+  "T03": {
+    "values": ["slack", "critical", "#tide-critical"],
+    "citations": [
+      {"path": "config/runtime.toml", "start": 11, "end": 11, "contains": "channel = \"slack\""},
+      {"path": "src/dispatcher.py", "start": 6, "end": 6, "contains": "resolve_channel(configured_channel, severity)"},
+      {"path": "src/channels.py", "start": 3, "end": 3, "contains": "\"critical\": \"#tide-critical\""},
+      {"path": "src/channels.py", "start": 9, "end": 10, "contains": "if channel == \"slack\":"}
+    ]
+  },
+  "T04": {
+    "values": ["ST-03", "Cedar", "180"],
+    "citations": [
+      {"path": "data/stations.csv", "start": 4, "end": 4, "contains": "ST-03,north,Cedar"},
+      {"path": "config/alerts.toml", "start": 2, "end": 3, "contains": "threshold_cm = 180"}
+    ]
+  },
+  "T05": {
+    "values": ["ST-02", "Brook", "240", "warning"],
+    "citations": [
+      {"path": "data/stations.csv", "start": 3, "end": 3, "contains": "ST-02,south,Brook"},
+      {"path": "config/alerts.toml", "start": 6, "end": 7, "contains": "threshold_cm = 240"},
+      {"path": "config/alerts.toml", "start": 8, "end": 8, "contains": "severity = \"warning\""}
+    ]
+  },
+  "T06": {
+    "values": ["14", "90"],
+    "citations": [
+      {"path": "src/storage.py", "start": 3, "end": 3, "contains": "RETENTION_DAYS = 14"},
+      {"path": "archive/runtime.toml", "start": 8, "end": 8, "contains": "retention_days = 90"}
+    ]
+  },
+  "T07": {
+    "values": ["src/dispatcher.py", "len(events)", "1 if events else 0"],
+    "citations": [
+      {"path": "config/runtime.toml", "start": 8, "end": 8, "contains": "dispatcher = \"src/dispatcher.py\""},
+      {"path": "src/dispatcher.py", "start": 10, "end": 12, "contains": "return len(events)"},
+      {"path": "archive/dispatcher.py", "start": 4, "end": 6, "contains": "return 1 if events else 0"}
+    ]
+  },
+  "T08": {
+    "values": ["GET", "/stations/summary", "analyst"],
+    "citations": [{"path": "src/routes.py", "start": 5, "end": 5, "contains": "(\"GET\", \"/stations/summary\", \"analyst\")"}]
+  },
+  "T09": {
+    "values": [],
+    "citations": [],
+    "absent_query": "pagerduty",
+    "status": "not_found"
+  },
+  "T10": {
+    "values": ["harbor-desk@tidewatch.example", "twctl snapshot show ST-01"],
+    "citations": [
+      {"path": "docs/runbook.md", "start": 6, "end": 6, "contains": "harbor-desk@tidewatch.example"},
+      {"path": "docs/runbook.md", "start": 7, "end": 7, "contains": "twctl snapshot show ST-01"}
+    ]
+  },
+  "T11": {
+    "values": ["false", "POST", "/stations/export", "operator"],
+    "citations": [
+      {"path": "config/runtime.toml", "start": 12, "end": 12, "contains": "export_enabled = false"},
+      {"path": "src/routes.py", "start": 6, "end": 6, "contains": "(\"POST\", \"/stations/export\", \"operator\")"}
+    ]
+  },
+  "T12": {
+    "values": [],
+    "pixels": {"top_left": "red", "top_right": "blue"},
+    "citations": [{"path": "assets/status.png.b64", "start": 1, "end": 1, "contains": "iVBORw0KGgo"}]
+  }
+}

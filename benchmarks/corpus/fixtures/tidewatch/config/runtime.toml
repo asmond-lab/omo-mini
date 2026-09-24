@@ -1,0 +1,12 @@
+# Active deployment settings for Tidewatch.
+[server]
+bind = "127.0.0.1"
+port = 4182
+
+[scheduler]
+poll_seconds = 45
+dispatcher = "src/dispatcher.py"
+
+[delivery]
+channel = "slack"
+export_enabled = false
