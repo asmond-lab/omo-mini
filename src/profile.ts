@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { z } from "zod";
@@ -19,7 +20,7 @@ export function localEndpoint(baseUrl: string): URL {
 
 export function profilePaths(stateDir = join(homedir(), ".omo-mini")) {
   const state = resolve(stateDir);
-  return { state, home: join(state, "home"), agent: join(state, "agent"), sessions: join(state, "sessions") };
+  return { state, home: join(state, "home"), agent: join(state, "agent"), sessions: join(state, "sessions"), memory: join(state, "memory") };
 }
 
 export function profileEnvironment(original: NodeJS.ProcessEnv, paths: ReturnType<typeof profilePaths>, selected: LocalModel, baseUrl: string, root: string): NodeJS.ProcessEnv {
@@ -35,6 +36,7 @@ export function profileEnvironment(original: NodeJS.ProcessEnv, paths: ReturnTyp
   env["OMO_CODING_AGENT_DIR"] = paths.agent;
   env["SENPI_CODING_AGENT_DIR"] = paths.agent;
   env["PI_CODING_AGENT_DIR"] = paths.agent;
+  env["OMO_MEMORY_HOME"] = paths.memory;
   env["OMO_MINI_MODEL"] = selected.id;
   env["OMO_MINI_CONTEXT"] = String(selected.loaded_context_length);
   env["OMO_MINI_BASE_URL"] = new URL("/v1", baseUrl).href;
@@ -60,6 +62,28 @@ export function modelsConfig(model: LocalModel, baseUrl: string) {
 
 export function upstreamEntry(): string {
   return resolve(require.resolve("omo-ai/package.json"), "..", "bin", "omo.js");
+}
+
+// OmO merges ancestor project configs after the isolated user config. Preserve
+// unrelated settings, but refuse any memory override that could undo the local
+// identity, offline policy or the deliberately disabled background workers.
+const SAFE_MEMORY = { enabled: true, agent: "auto", sync: { enabled: false },
+  reflection: { enabled: false }, nudge: { enabled: false }, facts: { enabled: false },
+  dream: { enabled: false }, recall: { enabled: false } } as const;
+function compatibleMemory(value: unknown, expected: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || expected === null || typeof expected !== "object") return value === expected;
+  return Object.entries(value).every(([key, child]) => key in expected && compatibleMemory(child, (expected as Record<string, unknown>)[key]));
+}
+function assertIsolatedProjectConfig(path: string): void {
+  let config: unknown;
+  try { config = Bun.JSONC.parse(readFileSync(path, "utf8")); }
+  catch { return; } // OmO ignores malformed project config; no override is applied.
+  if (!config || typeof config !== "object" || Array.isArray(config)) return;
+  const configObject = config as Record<string, unknown>;
+  const layers: unknown[] = [configObject, configObject["[native]"], configObject["[senpi]"]];
+  for (const layer of layers) if (layer && typeof layer === "object" && "memory" in layer &&
+    !compatibleMemory((layer as Record<string, unknown>)["memory"], SAFE_MEMORY))
+    throw new MiniError("config", `Project OmO memory override would break the isolated local policy at ${path}`);
 }
 
 const optionsSchema = z.object({
@@ -100,8 +124,23 @@ export async function prepareProfile(options: Options) {
   const model = await discover(options.baseUrl, options.model);
   const root = resolve(options.root);
   if (!isAbsolute(root)) throw new MiniError("workspace", "Workspace must be absolute");
+  // OmO reads project .omo configs independently of Senpi's --no-approve.
+  // The remapped home is not an ancestor of the workspace; even the real home
+  // can be a project layer. Validate every ancestor OmO can merge.
+  for (let path = root; dirname(path) !== path; path = dirname(path)) {
+    const jsonc = join(path, ".omo", "omo.jsonc"), json = join(path, ".omo", "omo.json");
+    if (existsSync(jsonc)) assertIsolatedProjectConfig(jsonc);
+    else if (existsSync(json)) assertIsolatedProjectConfig(json);
+  }
   const paths = profilePaths(options.stateDir);
-  await Promise.all([mkdir(paths.home, { recursive: true }), mkdir(paths.agent, { recursive: true }), mkdir(paths.sessions, { recursive: true })]);
+  await Promise.all([mkdir(join(paths.home, ".omo"), { recursive: true }), mkdir(paths.agent, { recursive: true }), mkdir(paths.sessions, { recursive: true }), mkdir(paths.memory, { recursive: true })]);
+  // OmO loads $HOME/.omo/omo.json before project config. The isolated HOME and
+  // memory preflight prevent unsafe overrides; --no-approve excludes Senpi resources.
+  await writeFile(join(paths.home, ".omo", "omo.json"), JSON.stringify({ memory: {
+    enabled: true, sync: { enabled: false }, reflection: { enabled: false },
+    facts: { enabled: false }, dream: { enabled: false }, recall: { enabled: false },
+    nudge: { enabled: false },
+  } }, null, 2) + "\n");
   await writeFile(join(paths.agent, "models.json"), JSON.stringify(modelsConfig(model, options.baseUrl), null, 2) + "\n");
   // A 9B local model cannot afford the upstream 16K compaction and 20K recent-history defaults.
   // Native compaction still owns whole-message/tool-pair selection; never splice transcript entries here.

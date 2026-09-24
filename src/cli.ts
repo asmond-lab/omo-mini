@@ -40,13 +40,13 @@ export async function main(argv: readonly string[]): Promise<void> {
     const extension = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./extension.ts" : "./extension.js", import.meta.url));
     const args = [upstreamEntry(), "--offline", "--no-approve", "--no-model-fallback", "--no-recommended-models",
       "--no-extensions", "--no-prompt-templates", "--no-skills", "--omo-senpi-builtin-mcps-disabled",
-      "--tools", "read,grep,find,ls,bash,powershell,edit,write",
-      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-memory-disabled", "--omo-senpi-onboarding-disabled",
+      "--tools", "read,grep,find,ls,bash,powershell,edit,write,memory,create_goal,update_goal,get_goal,todo",
+      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-onboarding-disabled",
       "--omo-senpi-lsp-disabled", "--omo-senpi-telemetry-disabled",
       "--extension", extension, "--session-dir", profile.paths.sessions,
       "--provider", "omo-mini-local", "--model", profile.model.id, "--models", `omo-mini-local/${profile.model.id}`,
       "--permission-preset", options.permission,
-      "--permission", "bash:rm *=deny"];
+      "--permission", `${options.permission === "workspace" ? "memory=allow," : ""}create_goal=allow,update_goal=allow,get_goal=allow,todo=allow,bash:rm *=deny`];
     if (options.command === "rpc") args.push("--mode", "rpc");
     if (options.command === "run") {
       if (options.session) args.push("--session", resolve(profile.paths.sessions, `${options.session}.jsonl`));

@@ -17,8 +17,20 @@ test("failed-action guard permits changed actions, real progress and turn reset 
   expect(guard.call("changed", "bash", { command: "different" })).toBeUndefined();
   guard.result("changed", true);
   expect(guard.call("old-failure", "bash", { command: "fail" })?.block).toBe(true);
-  guard.call("progress", "read", { path: "public.txt" });
-  guard.result("progress", false); // no stdout is still success
+  for (const [index, tool, input] of [
+    ["1", "create_goal", { objective: "fix" }],
+    ["2", "get_goal", {}], ["3", "update_goal", { status: "active" }],
+    ["4", "todo", { action: "list" }],
+    ["5", "todo", { action: "update", id: "task", status: "done" }],
+    ["6", "memory", { command: "create", path: "note.md", content: "fact" }],
+    ["7", "read", { path: "public.txt" }],
+  ] as const) {
+    guard.call(`bookkeeping-${index}`, tool, input);
+    guard.result(`bookkeeping-${index}`, false);
+    expect(guard.call(`still-blocked-${index}`, "bash", { command: "fail" })?.block).toBe(true);
+  }
+  guard.call("progress", "bash", { command: "repair" });
+  guard.result("progress", false); // successful alternative with no stdout is real progress
   expect(guard.call("recheck", "bash", { command: "fail" })).toBeUndefined();
   guard.result("recheck", true);
   expect(guard.call("different-tool", "powershell", { command: "fail" })).toBeUndefined();

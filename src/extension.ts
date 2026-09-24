@@ -1,12 +1,14 @@
 import type { ExtensionAPI } from "@code-yeongyu/senpi";
 import { MiniError } from "./local.ts";
 import { checkProviderRequest, compactPrompt, FailedActionGuard, identity, responseState, TurnBudget } from "./policy.ts";
+import { registerWorkCheckpoint } from "./work-checkpoint.ts";
 
 // Loaded after the actual OmO plugin. Native tools, resources, TUI, and sessions remain upstream-owned.
 export default function localProfile(pi: ExtensionAPI): void {
   const allowed = identity(process.env);
   const budget = new TurnBudget();
   const failures = new FailedActionGuard();
+  const work = registerWorkCheckpoint(pi, allowed.root);
   let pendingUserInputs = 0;
   pi.on("input", event => { if (event.source !== "extension") pendingUserInputs++; });
   pi.on("tool_execution_end", event => budget.toolResult(event.isError));
@@ -24,9 +26,9 @@ export default function localProfile(pi: ExtensionAPI): void {
       ctx.ui.setWidget("omo-mini-profile", lines);
     },
   });
-  pi.on("before_agent_start", event => {
+  pi.on("before_agent_start", (event, ctx) => {
     if (pendingUserInputs > 0) { pendingUserInputs--; budget.reset(); failures.reset(); }
-    return { systemPrompt: compactPrompt(event.systemPromptOptions, allowed) };
+    return { systemPrompt: compactPrompt(event.systemPromptOptions, allowed, event.systemPrompt) + work.projection(ctx) };
   });
   pi.on("tool_result", (event) => {
     failures.result(event.toolCallId, event.isError);
@@ -35,6 +37,7 @@ export default function localProfile(pi: ExtensionAPI): void {
   });
   pi.on("before_provider_request", (event) => {
     try {
+      if (work.failure()) return { action: "reject", reason: work.failure() };
       checkProviderRequest(event.model, event.payload, allowed);
       const limit = budget.admission();
       if (limit) return { action: "reject", reason: limit };
