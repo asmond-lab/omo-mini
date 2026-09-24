@@ -6,7 +6,7 @@ import { chooseModel, checkBudget, MiniError } from "../src/local.ts";
 import { confined, readScoped, searchScoped, workspace } from "../src/tools.ts";
 import { pngAttachment, parseClipboard, fileDropAttachment } from "../src/clipboard.ts";
 import { InputAssembler } from "../src/input.ts";
-import { parseArgs } from "../src/cli.ts";
+import { parseArgs } from "../src/profile.ts";
 
 const model = { id: "local", state: "loaded", type: "vlm", loaded_context_length: 4096, capabilities: ["tool_use"] };
 
@@ -103,7 +103,7 @@ test("multiline Unicode paste retains line breaks as one task", () => {
 test("real CLI entry prints help and exits nonzero for invalid flags", () => {
   const help = Bun.spawnSync([process.execPath, "src/cli.ts", "--help"], { cwd: join(import.meta.dir, "..") });
   expect(help.exitCode).toBe(0);
-  expect(new TextDecoder().decode(help.stdout)).toContain("omo-mini 0.1.0");
+  expect(new TextDecoder().decode(help.stdout)).toContain("omo-mini 0.2.0");
   const invalid = Bun.spawnSync([process.execPath, "src/cli.ts", "run", "--root", ".", "--json"], { cwd: join(import.meta.dir, "..") });
   expect(invalid.exitCode).toBe(1);
   expect(JSON.parse(new TextDecoder().decode(invalid.stdout)).error.code).toBe("arguments");
@@ -112,7 +112,7 @@ test("real CLI entry prints help and exits nonzero for invalid flags", () => {
 test("CLI rejects missing task, bad URL and unknown argument", () => {
   expect(() => parseArgs(["run", "--root", "."])).toThrow("requires --task");
   expect(() => parseArgs(["doctor", "--base-url", "https://user:secret@server/v1"])).toThrow("without credentials");
-  expect(() => parseArgs(["run", "--wat"])).toThrow("Unknown argument");
+  expect(() => parseArgs(["run", "--wat"])).toThrow("Unsupported or missing option");
 });
 
 test("paste markers split across chunks and embedded controls are assembled once", () => {
@@ -138,8 +138,7 @@ test("image budget counts vision tiles, not PNG base64 as text tokens", () => {
   expect(() => checkBudget({ messages: [pngAttachment(png).image] }, 12000)).toThrow("no request sent");
 });
 
-test("CLI strategy and command-specific arguments reject invalid configuration", () => {
-  expect(parseArgs(["run", "--task", "hello", "--strategy", "grounded"]).strategy).toBe("grounded");
-  expect(() => parseArgs(["run", "--task", "hello", "--strategy", "unknown"])).toThrow("--strategy");
-  expect(() => parseArgs(["--json"])).toThrow("interactive accepts");
+test("native profile rejects removed bare-agent strategies and interactive JSON", () => {
+  expect(() => parseArgs(["run", "--task", "hello", "--strategy", "grounded"])).toThrow("Unsupported or missing option");
+  expect(() => parseArgs(["--json"])).toThrow("--json requires run or doctor");
 });

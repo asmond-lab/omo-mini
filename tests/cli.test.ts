@@ -23,7 +23,7 @@ test("real CLI JSON over-context fails before inference", async () => {
     const result = JSON.parse(out);
     expect(exit).toBe(1);
     expect(result.reason).toBe("error");
-    expect(result.error).toContain("no request sent");
+    expect(result.error.code).toBe("model_admission");
     expect(inference).toBe(0);
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
 });
