@@ -31,7 +31,7 @@ The state directory also contains `memory/`; the launcher puts OmO's config unde
 
 Earlier bounded single-result checkpoints remain readable. If a derived checkpoint is invalid, its data is omitted with a warning while the selected conversation remains available; verify actual results before treating any plan as completed work. A different-project session remains blocked.
 
-See [repetition and memory evidence](docs/evidence/repetition-memory.md) for native QA and known limits.
+See [repetition and memory evidence](docs/evidence/repetition-memory.md) and the [checkpoint recovery receipt](docs/evidence/checkpoint-recovery.md) for native QA and known limits.
 
 ### Local capacity
 
