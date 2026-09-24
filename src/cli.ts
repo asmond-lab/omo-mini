@@ -9,13 +9,13 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 
 const HELP = `omo-mini 0.1.0 (read-only local agent)
 Usage: omo-mini doctor [--base-url URL] [--model ID] [--json]
-       omo-mini run --root PATH --task TEXT [--clipboard] [--image PNG] [--base-url URL] [--model ID] [--json]
+       omo-mini run --root PATH --task TEXT [--clipboard] [--image PNG] [--base-url URL] [--model ID] [--strategy baseline|grounded] [--json]
        omo-mini [--root PATH] [--base-url URL] [--model ID]  (interactive; /paste, /quit)
 No global OmO configuration is read. Only a loaded tool-capable local model is selected.
 `;
 
 type Flags = { readonly command: "doctor" | "run" | "interactive" | "help"; readonly baseUrl: string; readonly model?: string | undefined;
-  readonly root: string; readonly task?: string | undefined; readonly image?: string | undefined; readonly clipboard: boolean; readonly json: boolean };
+  readonly root: string; readonly strategy?: "baseline" | "grounded" | undefined; readonly task?: string | undefined; readonly image?: string | undefined; readonly clipboard: boolean; readonly json: boolean };
 export function parseArgs(argv: readonly string[]): Flags {
   const first = argv[0];
   const command = first === "doctor" || first === "run" ? first : first === "--help" || first === "-h" || first === "help" ? "help" : "interactive";
@@ -25,21 +25,26 @@ export function parseArgs(argv: readonly string[]): Flags {
   for (let i = 0; i < items.length; i++) {
     const key = items[i];
     if (key === "--help" || key === "-h") return { command: "help", baseUrl: "http://localhost:1234/v1", root: process.cwd(), clipboard: false, json: false };
-    if (!key || !["--base-url", "--model", "--root", "--task", "--image", "--clipboard", "--json"].includes(key)) throw new MiniError("arguments", `Unknown argument: ${key}`);
+    if (!key || !["--base-url", "--model", "--root", "--task", "--image", "--strategy", "--clipboard", "--json"].includes(key)) throw new MiniError("arguments", `Unknown argument: ${key}`);
     if (key === "--json" || key === "--clipboard") { if (switches.has(key)) throw new MiniError("arguments", `Duplicate ${key}`); switches.add(key); continue; }
     if (values.has(key) || !items[i + 1] || items[i + 1]?.startsWith("--")) throw new MiniError("arguments", `Missing or duplicate value: ${key}`);
     values.set(key, items[++i] ?? "");
   }
   if (command === "run" && !values.has("--task") && !switches.has("--clipboard")) throw new MiniError("arguments", "run requires --task or --clipboard");
-  if (command === "doctor" && (values.has("--task") || values.has("--root") || values.has("--image") || switches.has("--clipboard"))) throw new MiniError("arguments", "doctor accepts only endpoint/model/json options");
+  if (command === "doctor" && (values.has("--task") || values.has("--root") || values.has("--image") || values.has("--strategy") || switches.has("--clipboard"))) throw new MiniError("arguments", "doctor accepts only endpoint/model/json options");
+  if (command === "interactive" && (values.has("--task") || values.has("--image") || values.has("--strategy") || switches.size)) throw new MiniError("arguments", "interactive accepts only endpoint/model/root options");
+  if (command === "run" && switches.has("--clipboard") && values.has("--image")) throw new MiniError("arguments", "Choose --clipboard or --image, not both");
+  const strategyValue = values.get("--strategy");
+  if (strategyValue && strategyValue !== "baseline" && strategyValue !== "grounded") throw new MiniError("arguments", "--strategy must be baseline or grounded");
+  const strategy = strategyValue === "grounded" ? "grounded" : strategyValue === "baseline" ? "baseline" : undefined;
   const baseUrl = values.get("--base-url") ?? "http://localhost:1234/v1";
   endpoint(baseUrl);
   return { command, baseUrl, root: values.get("--root") ?? process.cwd(), ...(values.has("--model") ? { model: values.get("--model") } : {}),
     ...(values.has("--task") ? { task: values.get("--task") } : {}), ...(values.has("--image") ? { image: values.get("--image") } : {}),
-    clipboard: switches.has("--clipboard"), json: switches.has("--json") };
+    ...(strategy ? { strategy } : {}), clipboard: switches.has("--clipboard"), json: switches.has("--json") };
 }
 
-async function run(flags: Flags, taskInput?: string, paste = false): Promise<unknown> {
+async function run(flags: Flags, taskInput?: string, paste = false, signal?: AbortSignal): Promise<unknown> {
   const selected = await discover(flags.baseUrl, flags.model);
   if (flags.command === "doctor") return { reachable: true, model: selected.id, loadedContext: selected.loaded_context_length, toolCapable: true };
   const root = await workspace(flags.root);
@@ -59,8 +64,8 @@ async function run(flags: Flags, taskInput?: string, paste = false): Promise<unk
   if (!task.trim()) throw new MiniError("arguments", "Task text is empty");
   if (Buffer.byteLength(task, "utf8") > 65536) throw new MiniError("arguments", "Task exceeds 64 KiB");
   if (images.length && selected.type !== "vlm") throw new MiniError("model_capability", "Loaded model does not advertise vision support");
-  const result = await runTask({ root, task, selected, baseUrl: flags.baseUrl, ...(images.length ? { images } : {}) });
-  if (result.reason !== "stop") process.exitCode = 1;
+  const result = await runTask({ root, task, selected, baseUrl: flags.baseUrl, ...(flags.strategy ? { strategy: flags.strategy } : {}), ...(images.length ? { images } : {}), ...(signal ? { signal } : {}) });
+  if (result.reason !== "stop" && flags.command === "run") process.exitCode = 1;
   return result;
 }
 
@@ -68,26 +73,46 @@ async function interactive(flags: Flags): Promise<void> {
   if (!stdin.isTTY || !stdin.setRawMode) throw new MiniError("terminal", "Interactive mode requires a terminal; use run for scripts");
   stdout.write("omo-mini read-only local mode. /paste reads clipboard; /quit exits. Each task starts fresh.\nomo-mini> ");
   const input = new InputAssembler();
+  const queue: string[] = [];
+  let active: Promise<void> | undefined;
+  let controller: AbortController | undefined;
+  let quitting = false;
+  const drain = () => {
+    if (active || quitting) return;
+    const line = queue.shift();
+    if (line === undefined) return;
+    controller = new AbortController();
+    const signal = controller.signal;
+    active = (async () => {
+      try {
+        const result = await run(flags, line.trim() === "/paste" ? "" : line, line.trim() === "/paste", signal);
+        if (typeof result === "object" && result && "answer" in result) stdout.write(`${result.answer}\n`);
+      } catch (error) { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); }
+    })().finally(() => { active = undefined; controller = undefined; if (!quitting) { stdout.write("omo-mini> "); drain(); } });
+  };
   stdin.setRawMode(true);
   stdin.setEncoding("utf8");
   stdout.write("\x1b[?2004h");
   try {
     for await (const chunk of stdin) {
       const raw = String(chunk);
+      if (controller && raw.includes("\x03")) {
+        controller.abort();
+        if (raw === "\x03") continue;
+      }
       stdout.write(raw.replace(/\x1b\[200~|\x1b\[201~/g, "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x03/g, "").replace(/\x7f/g, "\b \b").replace(/\r\n|\r/g, "\n").replace(/[\x00-\x08\x0b-\x1f]/g, ""));
       for (const line of input.feed(raw)) {
         stdout.write("\n");
-        if (line.trim() === "/quit") return;
-        if (line.trim()) {
-          try {
-            const result = await run(flags, line.trim() === "/paste" ? "" : line, line.trim() === "/paste");
-            if (typeof result === "object" && result && "answer" in result) stdout.write(`${result.answer}\n`);
-          } catch (error) { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); }
+        if (line === "/quit") {
+          if (controller) { controller.abort(); continue; }
+          quitting = true; return;
         }
-        stdout.write("omo-mini> ");
+        if (line.trim()) queue.push(line);
       }
+      drain();
     }
-  } finally { stdout.write("\x1b[?2004l\n"); stdin.setRawMode(false); }
+    if (active) await active;
+  } finally { controller?.abort(); stdout.write("\x1b[?2004l\n"); stdin.setRawMode(false); }
 }
 
 export async function main(argv: readonly string[]): Promise<void> {

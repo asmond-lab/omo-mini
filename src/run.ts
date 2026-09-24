@@ -9,23 +9,27 @@ import { scopedTools, workspace } from "./tools.ts";
 export type ToolRecord = { readonly name: string; readonly result: string; readonly isError: boolean };
 export type RunResult = { readonly answer: string; readonly tools: readonly ToolRecord[]; readonly references: readonly string[];
   readonly elapsedMs: number; readonly usage: { readonly input: number; readonly output: number } | null;
-  readonly reason: string; readonly error?: string; readonly requests: number };
+  readonly reason: string; readonly error?: string; readonly requests: number; readonly requestBytes: readonly number[] };
 
 const PROMPT = "You are omo-mini, a read-only workspace investigator. Search/read files before making claims. Cite file:line from observed tool output only. If evidence is absent, say so. Keep the answer concise.";
+const GROUNDED = `${PROMPT} For each factual claim, give its observed file:line citation. Where versions conflict, identify the active source before concluding; do not invent citations.`;
 
 export async function runTask(config: { readonly root: string; readonly task: string; readonly selected: LocalModel; readonly baseUrl: string;
-  readonly images?: readonly ImageContent[]; readonly deadlineMs?: number; readonly signal?: AbortSignal }): Promise<RunResult> {
+  readonly images?: readonly ImageContent[]; readonly strategy?: "baseline" | "grounded"; readonly deadlineMs?: number; readonly signal?: AbortSignal }): Promise<RunResult> {
   const start = performance.now();
   const root = await workspace(config.root);
   const model = sdkModel(config.selected, config.baseUrl);
   const records: ToolRecord[] = [];
+  const prompt = config.strategy === "grounded" ? GROUNDED : PROMPT;
+  const requestBytes: number[] = [];
   let requests = 0;
   let failures = 0;
   let budgetFailure: string | undefined;
   let usageInput = 0;
   let usageOutput = 0;
   let hasUsage = false;
-  const agent = new Agent({ initialState: { model, systemPrompt: PROMPT, tools: scopedTools(root) },
+  const tools = scopedTools(root);
+  const agent = new Agent({ initialState: { model, systemPrompt: prompt, tools },
     toolExecution: "sequential",
     streamFn: (_model, context, options) => {
       requests++;
@@ -33,7 +37,12 @@ export async function runTask(config: { readonly root: string; readonly task: st
       try {
         if (requests > 8) rejection = "Maximum of 8 model requests reached";
         else if (failures >= 3) rejection = "Maximum of 3 tool errors reached";
-        else checkBudget(context.messages, model.contextWindow);
+        else if (config.signal?.aborted) rejection = "Task cancelled before request";
+        else {
+          const request = { system: prompt, tools: tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters })), messages: context.messages };
+          checkBudget(request, model.contextWindow);
+          requestBytes.push(Buffer.byteLength(JSON.stringify(request), "utf8"));
+        }
       } catch (error) {
         if (error instanceof MiniError) rejection = error.message;
         else throw error;
@@ -66,7 +75,7 @@ export async function runTask(config: { readonly root: string; readonly task: st
   const onInterrupt = () => agent.abort();
   process.once("SIGINT", onInterrupt);
   config.signal?.addEventListener("abort", onInterrupt, { once: true });
-  if (config.signal?.aborted) agent.abort();
+  // A pre-aborted Agent.abort() is reset by prompt(); the streaming guard above persists.
   try {
     if (config.images?.length) await agent.prompt(config.task, [...config.images]);
     else await agent.prompt(config.task);
@@ -83,11 +92,11 @@ export async function runTask(config: { readonly root: string; readonly task: st
     return lines.flatMap(line => {
       const search = /^(.+?:\d+):/.exec(line);
       const read = /^(\d+):/.exec(line);
-      return search?.[1] ? [search[1]] : heading && read?.[1] ? [`${heading}:${read[1]}`] : [];
+      return search?.[1] ? [search[1].replaceAll("\\", "/")] : heading && read?.[1] ? [`${heading.replaceAll("\\", "/")}:${read[1]}`] : [];
     });
   }))].slice(0, 30);
   const reason = budgetFailure ? "error" : assistant?.role === "assistant" ? assistant.stopReason : "error";
   return { answer, tools: records, references, elapsedMs: Math.round(performance.now() - start),
     usage: hasUsage ? { input: usageInput, output: usageOutput } : null, reason,
-    ...(budgetFailure || agent.state.errorMessage ? { error: budgetFailure ?? agent.state.errorMessage } : {}), requests };
+    ...(budgetFailure || agent.state.errorMessage ? { error: budgetFailure ?? agent.state.errorMessage } : {}), requests, requestBytes };
 }

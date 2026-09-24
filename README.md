@@ -9,16 +9,17 @@ bun install --frozen-lockfile
 bun run typecheck
 bun test
 bun run build
-bun dist/cli.js --help
+bun link                  # register the local bin (no global OmO configuration changes)
+omo-mini --help
 bun dist/cli.js doctor --json
 bun dist/cli.js run --root fixtures/tiny --task 'Find invoiceTotal; report file and line and what it adds' --json
 ```
 
-`package.json` declares `bin.omo-mini` at `dist/cli.js` for package-manager linking. Run the built entry directly as above without any global settings or package installation. No OmO configuration, extension, session, or resource directory is loaded or written. Default base URL is `http://localhost:1234/v1`; `--base-url URL` and `--model ID` override it. The endpoint must serve `GET /api/v0/models` at the same origin and OpenAI-compatible streaming `POST /v1/chat/completions`. Only an already-loaded model advertising `tool_use` with `loaded_context_length` can be used; multiple eligible models require `--model`. There is no cloud fallback or model loading.
+`bun link` registers the independently executable `omo-mini` command in Bun's user bin directory; put that directory on `PATH` if necessary. Alternatively run the built entry directly. No OmO configuration, extension, session, or resource directory is loaded or written. Default base URL is `http://localhost:1234/v1`; `--base-url URL` and `--model ID` override it. The endpoint must serve `GET /api/v0/models` at the same origin and OpenAI-compatible streaming `POST /v1/chat/completions`. Only an already-loaded model advertising `tool_use` with `loaded_context_length` can be used; multiple eligible models require `--model`. There is no cloud fallback or model loading.
 
 `doctor --json` returns endpoint reachability, selected model, and *loaded* context length. `run --root PATH --task TEXT --json` returns answer, tool results, observed file:line references, elapsed milliseconds, actual provider token usage when reported (otherwise null), request count, and stop/error reason. Non-stop results exit 1. JSON stdout contains only the result; image status is stderr. References are observed tool transcript references, **not** a guarantee that the answer cites them accurately. Never submit sensitive workspace content to an untrusted endpoint.
 
-Read-only tools: literal case-insensitive workspace search and numbered file read. Canonical realpaths block escape through `..` and symlinks; search skips symlinks, common dependency/output directories, and files over 64 KiB. Results and turns are bounded (30 hits, 300 files, 12 KiB per result, 8 requests, 3 tool failures, 90-second deadline). The streaming boundary checks the full serialized message/tool schema size before *every* request against the effective loaded context, with 1536 output-reserve units and framing overhead. This is a conservative UTF-8 **byte proxy**, not exact tokenization. An oversized request fails explicitly rather than truncating a tool-call/result pair. No edit or shell tools are exposed.
+Read-only tools: literal case-insensitive workspace search and numbered file read. Canonical realpaths block escape through `..` and symlinks; search skips symlinks, common dependency/output directories, and files over 64 KiB. Results and turns are bounded (30 hits, 300 files, 12 KiB per result, 8 requests, 3 tool failures, 90-second deadline). The streaming boundary accounts for system prompt, tool schema, and message text before *every* request against the effective loaded context, with 1536 output-reserve units and framing overhead. Text uses a conservative UTF-8 **byte proxy**; images use a 1024-unit-per-512px-tile estimate rather than counting PNG base64 as text. These are not exact provider token counts. An image inside the 2 MiB / 16-megapixel attachment limits can still exceed the loaded model context budget. An oversized request fails explicitly rather than truncating a tool-call/result pair. No edit or shell tools are exposed.
 
 ## Clipboard and images (Windows)
 
@@ -34,4 +35,6 @@ Interactive mode (`bun dist/cli.js --root fixtures/tiny`) starts each submitted 
 bun dist/cli.js run --root fixtures/tiny --task 'Read the exact words and number printed in the attached image. Do not use tools.' --image image.png --json
 ```
 
-CI checks typecheck, tests, and build without requiring a local model or access to the user's clipboard. Smoke evidence is in [docs/evidence/implementation.md](docs/evidence/implementation.md).
+CI checks typecheck, tests, and build without requiring a local model or access to the user's clipboard. Smoke evidence is in [docs/evidence/implementation.md](docs/evidence/implementation.md); independent real-surface evidence and the baseline/candidate report are in [docs/evidence/qa.md](docs/evidence/qa.md).
+
+For sequential reproducible local evaluation, run `bun benchmarks/evaluate.ts` after build and with the loaded vision/tool-capable model already served by LM Studio. The driver copies only the public Tidewatch fixture into a temporary model root; oracle and task metadata remain outside. It evaluates 11 exact file questions plus the twelfth as an actual attached PNG visual question (decoded outside the model). It writes [docs/evidence/performance.json](docs/evidence/performance.json), including answer-only citation scoring, per-task latency/usage/request byte proxy, and valid/invalid tool calls. `--strategy grounded` is experimental; measured reliability favors default `baseline`. Model sampling, hardware load, and non-deterministic inference can change individual results.

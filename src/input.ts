@@ -2,26 +2,40 @@
 export class InputAssembler {
   private pending = "";
   private paste = false;
+  private escape = "";
   feed(chunk: string): string[] {
     const output: string[] = [];
-    const parts = chunk.split(/(\x1b\[200~|\x1b\[201~)/);
-    for (const part of parts) {
-      if (part === "\x1b[200~") { this.paste = true; continue; }
-      if (part === "\x1b[201~") { this.paste = false; continue; }
-      if (this.paste) { this.pending += part; continue; }
-      if (part === "\u0003") { output.push("/quit"); continue; }
-      if (part === "\u007f" || part === "\b") { this.pending = this.pending.slice(0, -1); continue; }
-      const matches = [...part.matchAll(/\r\n|\r|\n/g)];
-      if (!matches.length) { this.pending += part; continue; }
-      // A paste delivered as one OS chunk can include internal line breaks.
-      if (matches.length > 1 || (matches[0]?.index ?? 0) + (matches[0]?.[0].length ?? 0) < part.length) {
-        output.push(this.pending + part.replace(/(?:\r\n|\r|\n)$/, "").replace(/\r\n|\r/g, "\n"));
+    let plain = "";
+    const submit = (text: string) => {
+      if (this.paste) { this.pending += text.replace(/\r\n|\r/g, "\n"); return; }
+      const normalized = text.replace(/\r\n|\r/g, "\n");
+      if (normalized.includes("\n")) {
+        // Native paste arrives as one chunk without bracket markers on some terminals.
+        output.push(this.pending + normalized.replace(/\n$/, ""));
         this.pending = "";
-      } else {
-        output.push(this.pending + part.slice(0, matches[0]?.index ?? 0));
-        this.pending = "";
+      } else this.pending += normalized;
+    };
+    for (const char of chunk) {
+      if (this.escape || char === "\x1b") {
+        this.escape += char;
+        if (this.escape === "\x1b[200~" || this.escape === "\x1b[201~") {
+          submit(plain); plain = "";
+          this.paste = this.escape === "\x1b[200~";
+          this.escape = "";
+        } else if (!["\x1b[200~", "\x1b[201~"].some(marker => marker.startsWith(this.escape))) {
+          this.escape = "";
+        }
+        continue;
       }
+      if (!this.paste && (char === "\x03" || char === "\x7f" || char === "\b")) {
+        submit(plain); plain = "";
+        if (char === "\x03") { this.pending = ""; output.push("/quit"); }
+        else this.pending = this.pending.slice(0, -1);
+        continue;
+      }
+      plain += char;
     }
+    submit(plain);
     return output;
   }
 }

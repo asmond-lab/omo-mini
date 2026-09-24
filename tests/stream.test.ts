@@ -87,3 +87,35 @@ test("budget guard prevents provider request without orphaning a tool pair", asy
     expect(calls).toBe(0);
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
 });
+
+test("pre-aborted signal never sends a request", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omo-mini-preabort-"));
+  const controller = new AbortController(); controller.abort();
+  let calls = 0;
+  const server = Bun.serve({ port: 0, fetch() { calls++; return new Response("unexpected"); } });
+  try {
+    const result = await runTask({ root, task: "do not send", selected, baseUrl: `http://localhost:${server.port}/v1`, signal: controller.signal });
+    expect(result.reason).toBe("error");
+    expect(calls).toBe(0);
+    expect(result.error).toContain("cancelled");
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
+});
+
+test("deadline aborts an open provider stream without claiming success", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omo-mini-deadline-"));
+  const requestSeen = Promise.withResolvers<void>();
+  const server = Bun.serve({ port: 0, fetch() {
+    requestSeen.resolve();
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(": stream open\n\n"));
+    } }), { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const result = await Promise.race([
+      runTask({ root, task: "wait for provider", selected, baseUrl: `http://localhost:${server.port}/v1`, deadlineMs: 50 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("deadline failed to abort provider")), 3000)),
+    ]);
+    await requestSeen.promise;
+    expect(result.reason).not.toBe("stop");
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
+});

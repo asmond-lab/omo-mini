@@ -22,7 +22,14 @@ function contained(root: string, target: string): boolean {
 
 export async function confined(root: string, name: string): Promise<string> {
   if (!name || name.includes("\0")) throw new MiniError("path", "Invalid path");
-  const target = await realpath(resolve(root, name));
+  const candidate = resolve(root, name);
+  if (!contained(root, candidate)) throw new MiniError("path", "Path escapes workspace");
+  let target: string;
+  try { target = await realpath(candidate); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") throw new MiniError("path", "Path not found in workspace");
+    throw error;
+  }
   if (!contained(root, target)) throw new MiniError("path", "Path escapes workspace");
   if (!(await stat(target)).isFile()) throw new MiniError("path", "Path is not a regular file");
   return target;

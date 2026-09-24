@@ -28,7 +28,7 @@ export async function fileAttachment(path: string): Promise<Attachment> {
 /** Read-only Windows clipboard snapshot: image takes priority, text included once if also present. */
 export async function systemClipboard(): Promise<ClipboardValue> {
   if (process.platform !== "win32") throw new MiniError("clipboard", "System clipboard is supported only on Windows");
-  const script = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $t=[System.Windows.Forms.Clipboard]::GetText(); $i=[System.Windows.Forms.Clipboard]::GetImage(); $v=@{text=$t;image=$null}; if($i -ne $null){$m=New-Object System.IO.MemoryStream; try{$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);$v.image=[Convert]::ToBase64String($m.ToArray())}finally{$m.Dispose();$i.Dispose()}}; $v|ConvertTo-Json -Compress`;
+  const script = `[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false); Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $t=[System.Windows.Forms.Clipboard]::GetText(); $i=[System.Windows.Forms.Clipboard]::GetImage(); $v=@{text=$t;image=$null}; if($i -ne $null){$m=New-Object System.IO.MemoryStream; try{$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);$v.image=[Convert]::ToBase64String($m.ToArray())}finally{$m.Dispose();$i.Dispose()}}; $v|ConvertTo-Json -Compress`;
   const { stdout } = await exec("powershell.exe", ["-NoProfile", "-STA", "-NonInteractive", "-Command", script], { timeout: 7000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
   return parseClipboard(JSON.parse(stdout));
 }

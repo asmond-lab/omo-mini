@@ -36,6 +36,7 @@ test("realpath confines reads and search and rejects symlink escape", async () =
     expect(await searchScoped(canonical, "beta")).toContain("inside.txt:2");
     expect(await searchScoped(canonical, "does-not-exist")).toContain("No matches");
     await expect(confined(canonical, "../outside/outside.txt")).rejects.toThrow("escapes workspace");
+    await expect(confined(canonical, "missing.txt")).rejects.toThrow("Path not found in workspace");
     await expect(confined(canonical, "linked/outside.txt")).rejects.toThrow("escapes workspace");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -79,4 +80,29 @@ test("CLI rejects missing task, bad URL and unknown argument", () => {
   expect(() => parseArgs(["run", "--root", "."])).toThrow("requires --task");
   expect(() => parseArgs(["doctor", "--base-url", "https://user:secret@server/v1"])).toThrow("without credentials");
   expect(() => parseArgs(["run", "--wat"])).toThrow("Unknown argument");
+});
+
+test("paste markers split across chunks and embedded controls are assembled once", () => {
+  const assembler = new InputAssembler();
+  expect(assembler.feed("\x1b[20")).toEqual([]);
+  expect(assembler.feed("0~first\n猫\nthird\x1b[20")).toEqual([]);
+  expect(assembler.feed("1~")).toEqual([]);
+  expect(assembler.feed("\r")).toEqual(["first\n猫\nthird"]);
+  expect(new InputAssembler().feed("ab\x03")).toEqual(["/quit"]);
+});
+
+test("image budget counts vision tiles, not PNG base64 as text tokens", () => {
+  const png = Buffer.alloc(1_500_000);
+  Buffer.from([137,80,78,71,13,10,26,10]).copy(png);
+  png.write("IHDR", 12); png.writeUInt32BE(420, 16); png.writeUInt32BE(120, 20);
+  const request = { system: "investigate", tools: [{ name: "read_file" }], messages: [{ content: [pngAttachment(png).image] }] };
+  expect(checkBudget(request, 12000)).toBeLessThan(12000);
+  png.writeUInt32BE(4000, 16); png.writeUInt32BE(4000, 20);
+  expect(() => checkBudget({ messages: [pngAttachment(png).image] }, 12000)).toThrow("no request sent");
+});
+
+test("CLI strategy and command-specific arguments reject invalid configuration", () => {
+  expect(parseArgs(["run", "--task", "hello", "--strategy", "grounded"]).strategy).toBe("grounded");
+  expect(() => parseArgs(["run", "--task", "hello", "--strategy", "unknown"])).toThrow("--strategy");
+  expect(() => parseArgs(["--json"])).toThrow("interactive accepts");
 });

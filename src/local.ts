@@ -54,9 +54,20 @@ export function sdkModel(selected: LocalModel, baseUrl: string): Model<"openai-c
   };
 }
 
-/** Conservative UTF-8 byte upper-bound proxy, not an exact tokenizer. Includes schema and message framing. */
-export function checkBudget(messages: readonly unknown[], contextWindow: number, outputReserve = 1536): number {
-  const bytes = Buffer.byteLength(JSON.stringify(messages), "utf8") + messages.length * 256 + 2048;
-  if (bytes + outputReserve > contextWindow) throw new MiniError("context_budget", `Request bound ${bytes} bytes plus ${outputReserve} output reserve exceeds loaded context ${contextWindow}; no request sent`);
+/** Conservative text-byte proxy plus a tile-based image-token estimate, not exact provider tokenization. */
+export function checkBudget(request: unknown, contextWindow: number, outputReserve = 1536): number {
+  let imageCost = 0;
+  const serialized = JSON.stringify(request, (key, value: unknown) => {
+    if (key === "data" && typeof value === "string" && value.length > 32 && value.startsWith("iVBORw0KGgo")) {
+      const header = Buffer.from(value.slice(0, 32), "base64");
+      const width = header.readUInt32BE(16), height = header.readUInt32BE(20);
+      // VLM patch costs depend on the provider; 1024 per 512px tile is a conservative estimate.
+      imageCost += Math.ceil(width / 512) * Math.ceil(height / 512) * 1024;
+      return "[image payload]";
+    }
+    return value;
+  });
+  const bytes = Buffer.byteLength(serialized, "utf8") + 2048 + imageCost;
+  if (bytes + outputReserve > contextWindow) throw new MiniError("context_budget", `Request bound ${bytes} text-byte/image-estimate units plus ${outputReserve} output reserve exceeds loaded context ${contextWindow}; no request sent`);
   return bytes;
 }
