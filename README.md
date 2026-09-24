@@ -1,4 +1,4 @@
-# omo-mini 0.2.1
+# omo-mini 0.2.2
 
 **An independent local-model profile of real OmO Native**, not a separate read-only agent. The `omo-mini` launcher starts pinned `omo-ai@5.0.0-0.beta.88`, its OmO plugin, and pinned Senpi `2026.9.23-5`. A small explicit extension adapts the prompt, tool output, request budget and error feedback to the already-loaded Qwen model. Within each user turn, an observed failed native tool action cannot execute again with identical tool arguments; the agent can try a different action or must stop after bounded blocked choices. Successful coding actions and new user turns permit justified retries. The native OmO/Senpi TUI, coding tools, project instructions, permission system, session tree and image handling remain upstream-owned.
 
@@ -28,6 +28,8 @@ On Windows, the native TUI uses **Alt+V** for image or text clipboard paste. Ctr
 ### Local memory and ongoing work
 
 The state directory also contains `memory/`; the launcher puts OmO's config under its isolated `home/.omo/omo.json` and enables git-backed, project-identity-scoped memory with sync, reflection, facts, dream, nudge and recall disabled. No remote is configured or pushed. Project OmO config unrelated to memory remains supported; conflicting memory identity, sync or background settings fail at launch. Run `/memfs init` once per project, `/memfs status` or `/memory` to inspect, and use the native `memory` tool with `command: "delete"` for an explicitly selected file to forget it. Save only intentionally durable approved project facts, not a task transcript. `/new` starts a fresh goal/todo/task but keeps approved facts for that project; `/resume` selects an earlier task. The native `create_goal`, `update_goal`, `get_goal`, and `todo` tools are enabled alongside the eight coding tools. A bounded, session-only work checkpoint records native successful tool results with call IDs, current goal, blocker and todo to survive failed compaction; intended actions are not execution evidence. Only successful coding actions, not memory/todo bookkeeping, clear the repeated-failure guard. Resume may need a further turn before upstream memory projection is ready; `/memory` can inspect the committed repository at any time after binding.
+
+Earlier bounded single-result checkpoints remain readable. If a derived checkpoint is invalid, its data is omitted with a warning while the selected conversation remains available; verify actual results before treating any plan as completed work. A different-project session remains blocked.
 
 See [repetition and memory evidence](docs/evidence/repetition-memory.md) for native QA and known limits.
 

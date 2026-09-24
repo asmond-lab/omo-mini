@@ -167,8 +167,11 @@ test("native committed memory, goal/todo and verified work survive compaction an
     await rpc.send("switch_session", { sessionPath: saved });
     const beforeInvalid = requests.length;
     await rpc.send("prompt", { message: "Continue after malformed checkpoint." }, true);
-    expect(requests.length).toBe(beforeInvalid);
-    expect(rpc.frames.some(frame => JSON.stringify(frame).includes("Invalid work checkpoint in selected session"))).toBe(true);
+    expect(requests.length).toBeGreaterThan(beforeInvalid); // A derived cache must not deadlock the conversation.
+    const recoveredWire = JSON.stringify(requests.slice(beforeInvalid));
+    expect(recoveredWire).not.toContain("x".repeat(8000));
+    expect(recoveredWire).not.toContain("<session_work_checkpoint>");
+    expect(rpc.frames.some(frame => frame.method === "notify" && frame.message?.includes("Invalid local work checkpoint"))).toBe(true);
     const c = join(base, "project-config-override");
     await mkdir(join(c, ".omo"), { recursive: true });
     await Bun.write(join(c, ".omo", "omo.json"), JSON.stringify({ memory: { sync: { enabled: true, remote: `http://127.0.0.1:${server.port}/forbidden` } } }));

@@ -37,7 +37,7 @@ export default function localProfile(pi: ExtensionAPI): void {
   });
   pi.on("before_provider_request", (event) => {
     try {
-      if (work.failure()) return { action: "reject", reason: work.failure() };
+      if (work.rootFailure()) return { action: "reject", reason: work.rootFailure() };
       checkProviderRequest(event.model, event.payload, allowed);
       const limit = budget.admission();
       if (limit) return { action: "reject", reason: limit };
