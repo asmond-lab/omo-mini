@@ -1,0 +1,14 @@
+diff --git a/bin/lib/package-paths.js b/bin/lib/package-paths.js
+index 7fc505077f588d1532326711a79eaa0794ce6891..5ab8c4cd3c85e69f0a2e55044ba679e7711f22cf 100644
+--- a/bin/lib/package-paths.js
++++ b/bin/lib/package-paths.js
+@@ -51,7 +51,8 @@ export function resolveSenpi(options = {}) {
+   // launcher change.
+   const bundlePath = join(distDir, "bundle", "cli.js")
+   const unbundledPath = join(distDir, "cli.js")
+-  const cliPath = existsSync(bundlePath) ? bundlePath : unbundledPath
++  // omo-mini: use Senpi's patchable module graph; the pre-linked bundle embeds an unpatched runner.
++  const cliPath = unbundledPath
+   if (!existsSync(cliPath)) {
+     throw new Error(`senpi CLI is missing at ${cliPath}; reinstall with: ${updateTarget().command}`)
+   }

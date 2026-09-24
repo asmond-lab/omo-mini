@@ -1,30 +1,11 @@
-# Third-party attribution
+# Third-party licenses and modifications
 
-Engine dependencies: `@earendil-works/pi-agent-core@0.87.1` and `@earendil-works/pi-ai@0.87.1`, public Senpi/pi engine packages. Registry metadata reports both as MIT-licensed. Their full upstream Senpi project is [code-yeongyu/senpi](https://github.com/code-yeongyu/senpi), also MIT. Runtime dependencies are installed independently; no OmO plugin or restricted OmO sources are copied. Retain upstream copyright and permission notices in redistributed dependency packages or bundles as required by MIT.
+**OmO Native** `omo-ai@5.0.0-0.beta.88` is the real runtime/plugin loaded by the independent `omo-mini` launcher. Full upstream [Sustainable Use License (SUL)](licenses/OmO-SUL-LICENSE.md) from [code-yeongyu/oh-my-openagent LICENSE.md](https://github.com/code-yeongyu/oh-my-openagent/blob/dev/LICENSE.md) accompanies this distribution; OmO as a whole is not MIT. It permits personal/non-commercial use and free non-commercial distribution with its conditions and unaltered notices; commercial use/distribution is not granted by this project's MIT LICENSE. Preserve its upstream license and notices when distributing the dependency. The installed plugin's `LICENSE` grants MIT only to named LSP adapter portions, not to the entire plugin.
 
-Senpi's upstream license notice (retrieved from the public repository on 2026-09-24):
+**Senpi** `@code-yeongyu/senpi@2026.9.23-5` is [MIT](licenses/Senpi-MIT-LICENSE) (full text from [code-yeongyu/senpi LICENSE](https://github.com/code-yeongyu/senpi/blob/main/LICENSE); copyright 2025 Mario Zechner upstream pi-mono; copyright 2026 Yeongyu Kim and Senpi contributors). The former v0.1 historical engine dependencies `@earendil-works/pi-agent-core@0.87.1` and `@earendil-works/pi-ai@0.87.1` are MIT and remain for legacy tests, not as a substitute for actual OmO. Keep original dependency license/notice files with redistributed packages or bundles.
 
-```text
-MIT License
+**Prominent modification notice:** omo-mini applies two **project-local** Bun `patchedDependencies`, documented in [docs/provider-rejection.md](docs/provider-rejection.md):
+- `@code-yeongyu/senpi@2026.9.23-5`: explicit fail-closed `before_provider_request` rejection sentinel and type declaration; ordinary extension bugs still log. The isolated local profile also suppresses OmO's bundled remote MCP declarations at registration (not just connection).
+- `omo-ai@5.0.0-0.beta.88`: launcher selects the pinned unbundled Senpi CLI so the project-local security patch is actually loaded. No installed global OmO files are modified.
 
-Copyright (c) 2025 Mario Zechner (upstream pi-mono)
-Copyright (c) 2026 Yeongyu Kim and senpi contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+The independent launcher and extension source in this repository have the repo's own MIT license, but the **combined OmO-backed distribution does not have an unrestricted MIT license**. Both license notices and the modification notice must travel with any free non-commercial redistribution that includes the OmO dependency.

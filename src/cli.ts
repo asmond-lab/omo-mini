@@ -1,128 +1,92 @@
 #!/usr/bin/env bun
-import { stdin, stdout, stderr } from "node:process";
-import { discover, endpoint, MiniError } from "./local.ts";
-import { systemClipboard, fileAttachment } from "./clipboard.ts";
-import { confined, workspace } from "./tools.ts";
-import { runTask } from "./run.ts";
-import { InputAssembler } from "./input.ts";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import { spawn } from "node:child_process";
+import { realpath } from "node:fs/promises";
+import { relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { stdout, stderr } from "node:process";
+import { text } from "node:stream/consumers";
+import { discover, MiniError } from "./local.ts";
+import { parseArgs, prepareProfile, upstreamEntry } from "./profile.ts";
 
-const HELP = `omo-mini 0.1.0 (read-only local agent)
-Usage: omo-mini doctor [--base-url URL] [--model ID] [--json]
-       omo-mini run --root PATH --task TEXT [--clipboard] [--image PNG] [--base-url URL] [--model ID] [--strategy baseline|grounded] [--json]
-       omo-mini [--root PATH] [--base-url URL] [--model ID]  (interactive; /paste, /quit)
-No global OmO configuration is read. Only a loaded tool-capable local model is selected.
+const HELP = `omo-mini 0.2.0 - independent local profile of OmO Native
+Usage: omo-mini [--root PATH] [--state-dir PATH] [--model ID] [--base-url URL] [--permission workspace|ask|read-only]
+       omo-mini run --root PATH --task TEXT [--image PATH] [--session NAME] [--json] [profile options]
+       omo-mini doctor [--json] [profile options]
+       omo-mini rpc [profile options] (native OmO JSONL protocol over stdin/stdout)
+OmO's native TUI supplies /new, /resume, Alt+V image/text paste on Windows and project instructions.
+Local-only; no inherited cloud auth, remote MCPs, or OmO global state. Profile defaults to ~/.omo-mini.
 `;
 
-type Flags = { readonly command: "doctor" | "run" | "interactive" | "help"; readonly baseUrl: string; readonly model?: string | undefined;
-  readonly root: string; readonly strategy?: "baseline" | "grounded" | undefined; readonly task?: string | undefined; readonly image?: string | undefined; readonly clipboard: boolean; readonly json: boolean };
-export function parseArgs(argv: readonly string[]): Flags {
-  const first = argv[0];
-  const command = first === "doctor" || first === "run" ? first : first === "--help" || first === "-h" || first === "help" ? "help" : "interactive";
-  const items = command === "interactive" ? argv : argv.slice(1);
-  const values = new Map<string, string>();
-  const switches = new Set<string>();
-  for (let i = 0; i < items.length; i++) {
-    const key = items[i];
-    if (key === "--help" || key === "-h") return { command: "help", baseUrl: "http://localhost:1234/v1", root: process.cwd(), clipboard: false, json: false };
-    if (!key || !["--base-url", "--model", "--root", "--task", "--image", "--strategy", "--clipboard", "--json"].includes(key)) throw new MiniError("arguments", `Unknown argument: ${key}`);
-    if (key === "--json" || key === "--clipboard") { if (switches.has(key)) throw new MiniError("arguments", `Duplicate ${key}`); switches.add(key); continue; }
-    if (values.has(key) || !items[i + 1] || items[i + 1]?.startsWith("--")) throw new MiniError("arguments", `Missing or duplicate value: ${key}`);
-    values.set(key, items[++i] ?? "");
-  }
-  if (command === "run" && !values.has("--task") && !switches.has("--clipboard")) throw new MiniError("arguments", "run requires --task or --clipboard");
-  if (command === "doctor" && (values.has("--task") || values.has("--root") || values.has("--image") || values.has("--strategy") || switches.has("--clipboard"))) throw new MiniError("arguments", "doctor accepts only endpoint/model/json options");
-  if (command === "interactive" && (values.has("--task") || values.has("--image") || values.has("--strategy") || switches.size)) throw new MiniError("arguments", "interactive accepts only endpoint/model/root options");
-  if (command === "run" && switches.has("--clipboard") && values.has("--image")) throw new MiniError("arguments", "Choose --clipboard or --image, not both");
-  const strategyValue = values.get("--strategy");
-  if (strategyValue && strategyValue !== "baseline" && strategyValue !== "grounded") throw new MiniError("arguments", "--strategy must be baseline or grounded");
-  const strategy = strategyValue === "grounded" ? "grounded" : strategyValue === "baseline" ? "baseline" : undefined;
-  const baseUrl = values.get("--base-url") ?? "http://localhost:1234/v1";
-  endpoint(baseUrl);
-  return { command, baseUrl, root: values.get("--root") ?? process.cwd(), ...(values.has("--model") ? { model: values.get("--model") } : {}),
-    ...(values.has("--task") ? { task: values.get("--task") } : {}), ...(values.has("--image") ? { image: values.get("--image") } : {}),
-    ...(strategy ? { strategy } : {}), clipboard: switches.has("--clipboard"), json: switches.has("--json") };
-}
-
-async function run(flags: Flags, taskInput?: string, paste = false, signal?: AbortSignal): Promise<unknown> {
-  const selected = await discover(flags.baseUrl, flags.model);
-  if (flags.command === "doctor") return { reachable: true, model: selected.id, loadedContext: selected.loaded_context_length, toolCapable: true };
-  const root = await workspace(flags.root);
-  const images: ImageContent[] = [];
-  let task = taskInput ?? flags.task ?? "";
-  if (flags.clipboard || paste) {
-    const value = await systemClipboard();
-    if (value.text) task = task ? `${task}\n${value.text}` : value.text;
-    if (value.attachment) { images.push(value.attachment.image); stderr.write(`Clipboard image: ${value.attachment.width}x${value.attachment.height} PNG\n`); }
-  }
-  if (flags.image) {
-    const attachment = await fileAttachment(await confined(root, flags.image));
-    if (!images.some(image => image.data === attachment.image.data)) images.push(attachment.image);
-    stderr.write(`Attached image: ${attachment.width}x${attachment.height} PNG\n`);
-  }
-  if (!task && images.length) task = "Describe the attached image.";
-  if (!task.trim()) throw new MiniError("arguments", "Task text is empty");
-  if (Buffer.byteLength(task, "utf8") > 65536) throw new MiniError("arguments", "Task exceeds 64 KiB");
-  if (images.length && selected.type !== "vlm") throw new MiniError("model_capability", "Loaded model does not advertise vision support");
-  const result = await runTask({ root, task, selected, baseUrl: flags.baseUrl, ...(flags.strategy ? { strategy: flags.strategy } : {}), ...(images.length ? { images } : {}), ...(signal ? { signal } : {}) });
-  if (result.reason !== "stop" && flags.command === "run") process.exitCode = 1;
-  return result;
-}
-
-async function interactive(flags: Flags): Promise<void> {
-  if (!stdin.isTTY || !stdin.setRawMode) throw new MiniError("terminal", "Interactive mode requires a terminal; use run for scripts");
-  stdout.write("omo-mini read-only local mode. /paste reads clipboard; /quit exits. Each task starts fresh.\nomo-mini> ");
-  const input = new InputAssembler();
-  const queue: string[] = [];
-  let active: Promise<void> | undefined;
-  let controller: AbortController | undefined;
-  let quitting = false;
-  const drain = () => {
-    if (active || quitting) return;
-    const line = queue.shift();
-    if (line === undefined) return;
-    controller = new AbortController();
-    const signal = controller.signal;
-    active = (async () => {
-      try {
-        const result = await run(flags, line.trim() === "/paste" ? "" : line, line.trim() === "/paste", signal);
-        if (typeof result === "object" && result && "answer" in result) stdout.write(`${result.answer}\n`);
-      } catch (error) { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); }
-    })().finally(() => { active = undefined; controller = undefined; if (!quitting) { stdout.write("omo-mini> "); drain(); } });
-  };
-  stdin.setRawMode(true);
-  stdin.setEncoding("utf8");
-  stdout.write("\x1b[?2004h");
-  try {
-    for await (const chunk of stdin) {
-      const raw = String(chunk);
-      if (controller && raw.includes("\x03")) {
-        controller.abort();
-        if (raw === "\x03") continue;
-      }
-      stdout.write(input.echo(raw));
-      for (const line of input.feed(raw)) {
-        if (line === "/quit") {
-          if (controller) { controller.abort(); continue; }
-          quitting = true; return;
-        }
-        if (line.trim()) queue.push(line);
-      }
-      drain();
-    }
-    if (active) await active;
-  } finally { controller?.abort(); stdout.write("\x1b[?2004l\n"); stdin.setRawMode(false); }
+async function imageArgument(root: string, image: string): Promise<string> {
+  const file = await realpath(resolve(root, image));
+  const rel = relative(root, file);
+  if (rel === ".." || rel.startsWith(`..${sep}`))
+    throw new MiniError("path", "Image must be inside the workspace");
+  return `@${file}`;
 }
 
 export async function main(argv: readonly string[]): Promise<void> {
-  let json = argv.includes("--json");
+  const json = argv.includes("--json");
   try {
-    const flags = parseArgs(argv);
-    json = flags.json;
-    if (flags.command === "help") { stdout.write(HELP); return; }
-    if (flags.command === "interactive") { await interactive(flags); return; }
-    const result = await run(flags);
-    stdout.write(`${JSON.stringify(result)}\n`);
+    const options = parseArgs(argv);
+    if (options.command === "help") { stdout.write(HELP); return; }
+    const root = await realpath(options.root);
+    if (options.command === "doctor") {
+      const selected = await discover(options.baseUrl, options.model);
+      stdout.write(`${JSON.stringify({ reachable: true, provider: "omo-mini-local", model: selected.id, loadedContext: selected.loaded_context_length, workspace: root, stateDir: options.stateDir ?? "~/.omo-mini" })}\n`);
+      return;
+    }
+    const profile = await prepareProfile({ ...options, root });
+    const extension = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./extension.ts" : "./extension.js", import.meta.url));
+    const args = [upstreamEntry(), "--offline", "--no-approve", "--no-model-fallback", "--no-recommended-models",
+      "--no-extensions", "--no-prompt-templates", "--no-skills", "--omo-senpi-builtin-mcps-disabled",
+      "--tools", "read,grep,find,ls,bash,powershell,edit,write",
+      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-memory-disabled", "--omo-senpi-onboarding-disabled",
+      "--omo-senpi-lsp-disabled", "--omo-senpi-telemetry-disabled",
+      "--extension", extension, "--session-dir", profile.paths.sessions,
+      "--provider", "omo-mini-local", "--model", profile.model.id, "--models", `omo-mini-local/${profile.model.id}`,
+      "--permission-preset", options.permission,
+      "--permission", "bash:rm *=deny"];
+    if (options.command === "rpc") args.push("--mode", "rpc");
+    if (options.command === "run") {
+      if (options.session) args.push("--session", resolve(profile.paths.sessions, `${options.session}.jsonl`));
+      if (options.json) args.push("--mode", "json");
+      args.push("--print");
+      if (options.image) args.push(await imageArgument(root, options.image));
+      args.push("--", options.task ?? "");
+    }
+    if (options.json) {
+      const child = spawn(process.execPath, args, { cwd: root, env: profile.env, stdio: ["inherit", "pipe", "pipe"], windowsHide: true });
+      const [code, output, errors] = await Promise.all([
+        new Promise<number>((done, reject) => { child.once("error", reject); child.once("exit", (exit, signal) => done(signal ? 1 : exit ?? 1)); }),
+        text(child.stdout), text(child.stderr),
+      ]);
+      if (errors) stderr.write(errors);
+      if (output) stdout.write(output);
+      const events: unknown[] = output.split(/\r?\n/).filter(Boolean).flatMap(line => {
+        try { return [JSON.parse(line) as unknown]; } catch { return []; }
+      });
+      const terminal = events.filter((event): event is { type: "agent_end"; aborted?: boolean; messages: { role: string; stopReason?: string; errorMessage?: string; content?: { type: string; text?: string }[] }[] } =>
+        typeof event === "object" && event !== null && "type" in event && event.type === "agent_end" && "messages" in event && Array.isArray(event.messages)).at(-1);
+      const last = terminal?.messages.filter(message => message.role === "assistant").at(-1);
+      const empty = last && !last.content?.some(part => part.type === "text" && part.text?.trim());
+      const failed = code !== 0 || !terminal || terminal.aborted || last?.stopReason === "error" || last?.stopReason === "length" || empty;
+      if (failed) {
+        const admission = /ModelUsabilityBudgetError:([^\r\n]*)/.exec(errors);
+        stdout.write(`${JSON.stringify({ type: "omo_mini_status", reason: "error", error: {
+          code: admission ? "model_admission" : terminal?.aborted ? "cancelled" : last?.stopReason === "length" ? "output_length" : last?.stopReason === "error" || last?.errorMessage ? "provider" : empty ? "empty_answer" : "provider",
+          message: admission?.[1]?.trim() ?? last?.errorMessage ?? (empty ? "Model returned an empty answer" : `OmO exited ${code} without a complete answer`),
+        } })}\n`);
+        process.exitCode = 1;
+      }
+    } else {
+      const exit = await new Promise<number>((done, reject) => {
+        const child = spawn(process.execPath, args, { cwd: root, env: profile.env, stdio: "inherit", windowsHide: false });
+        child.once("error", reject);
+        child.once("exit", (code, signal) => done(signal ? 1 : code ?? 1));
+      });
+      if (exit !== 0) process.exitCode = exit;
+    }
   } catch (error) {
     const code = error instanceof MiniError ? error.code : "runtime";
     const message = error instanceof Error ? error.message : String(error);
