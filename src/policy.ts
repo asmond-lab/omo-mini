@@ -58,6 +58,33 @@ export class TurnBudget {
   }
 }
 
+// Only observed native errors establish a failed action. A successful tool result
+// clears the failure, allowing a recheck after intervening progress.
+export class FailedActionGuard {
+  private readonly failed = new Set<string>();
+  private blocked = 0;
+  private readonly pending = new Map<string, string>();
+  get stopped(): boolean { return this.blocked >= 3; }
+
+  reset(): void { this.failed.clear(); this.blocked = 0; this.pending.clear(); }
+  call(id: string, tool: string, input: Record<string, unknown>): { block: true; reason: string; terminate: boolean } | undefined {
+    const action = JSON.stringify([tool, input]);
+    if (this.failed.has(action)) {
+      this.blocked++;
+      return { block: true, reason: "Repeated failed tool action blocked before execution. The previous execution returned an error; use a materially different tool or arguments, or report that the work is unfinished.", terminate: this.blocked >= 3 };
+    }
+    this.pending.set(id, action);
+    return undefined;
+  }
+  result(id: string, isError: boolean): void {
+    const action = this.pending.get(id);
+    if (action === undefined) return; // A blocked call still receives a native tool-result pair.
+    this.pending.delete(id);
+    if (isError) this.failed.add(action);
+    else { this.failed.clear(); this.blocked = 0; }
+  }
+}
+
 export function responseState(messages: readonly { readonly role: "assistant"; readonly stopReason?: string; readonly errorMessage?: string; readonly content?: readonly { readonly type: string; readonly text?: string }[] }[], aborted = false): string | undefined {
   if (aborted) return "Cancelled";
   const last = messages.filter(message => message.role === "assistant").at(-1);

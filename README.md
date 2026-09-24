@@ -1,6 +1,6 @@
-# omo-mini 0.2.0
+# omo-mini 0.2.1
 
-**An independent local-model profile of real OmO Native**, not a separate read-only agent. The `omo-mini` launcher starts pinned `omo-ai@5.0.0-0.beta.88`, its OmO plugin, and pinned Senpi `2026.9.23-5`. A small explicit extension adapts the prompt, tool output, request budget and error feedback to the already-loaded Qwen model. The native OmO/Senpi TUI, coding tools, project instructions, permission system, session tree and image handling remain upstream-owned.
+**An independent local-model profile of real OmO Native**, not a separate read-only agent. The `omo-mini` launcher starts pinned `omo-ai@5.0.0-0.beta.88`, its OmO plugin, and pinned Senpi `2026.9.23-5`. A small explicit extension adapts the prompt, tool output, request budget and error feedback to the already-loaded Qwen model. Within each user turn, an observed failed native tool action cannot execute again with identical tool arguments; the agent can try a different action or must stop after bounded blocked choices. Successful tool results and new user turns permit justified retries. The native OmO/Senpi TUI, coding tools, project instructions, permission system, session tree and image handling remain upstream-owned.
 
 ## Install and use
 

@@ -1,14 +1,16 @@
 import type { ExtensionAPI } from "@code-yeongyu/senpi";
 import { MiniError } from "./local.ts";
-import { checkProviderRequest, compactPrompt, identity, responseState, TurnBudget } from "./policy.ts";
+import { checkProviderRequest, compactPrompt, FailedActionGuard, identity, responseState, TurnBudget } from "./policy.ts";
 
 // Loaded after the actual OmO plugin. Native tools, resources, TUI, and sessions remain upstream-owned.
 export default function localProfile(pi: ExtensionAPI): void {
   const allowed = identity(process.env);
   const budget = new TurnBudget();
+  const failures = new FailedActionGuard();
   let pendingUserInputs = 0;
   pi.on("input", event => { if (event.source !== "extension") pendingUserInputs++; });
   pi.on("tool_execution_end", event => budget.toolResult(event.isError));
+  pi.on("tool_call", event => failures.call(event.toolCallId, event.toolName, event.input));
   const status = (ctx: { ui: { setStatus(key: string, text: string | undefined): void } }) =>
     ctx.ui.setStatus("omo-mini", `LOCAL ${allowed.model} | ${allowed.context} ctx | ${allowed.root}`);
   pi.on("session_start", (_event, ctx) => status(ctx));
@@ -23,13 +25,14 @@ export default function localProfile(pi: ExtensionAPI): void {
     },
   });
   pi.on("before_agent_start", event => {
-    if (pendingUserInputs > 0) { pendingUserInputs--; budget.reset(); }
+    if (pendingUserInputs > 0) { pendingUserInputs--; budget.reset(); failures.reset(); }
     return { systemPrompt: compactPrompt(event.systemPromptOptions, allowed) };
   });
-  pi.on("tool_result", (event) => ({
-    content: event.content.map(part => part.type === "text" && part.text.length > 6000
-      ? { ...part, text: `${part.text.slice(0, 6000)}\n[Tool output truncated by local profile]` } : part),
-  }));
+  pi.on("tool_result", (event) => {
+    failures.result(event.toolCallId, event.isError);
+    return { content: event.content.map(part => part.type === "text" && part.text.length > 6000
+      ? { ...part, text: `${part.text.slice(0, 6000)}\n[Tool output truncated by local profile]` } : part) };
+  });
   pi.on("before_provider_request", (event) => {
     try {
       checkProviderRequest(event.model, event.payload, allowed);
@@ -42,7 +45,9 @@ export default function localProfile(pi: ExtensionAPI): void {
   });
   pi.on("agent_end", (event, ctx) => {
     if (event.willRetry) return;
-    const notice = responseState(event.messages.filter(message => message.role === "assistant"), event.aborted);
+    const notice = failures.stopped && !event.aborted
+      ? "Local turn stopped: repeated failed action blocked before execution; work not completed. Try a different tool or arguments."
+      : responseState(event.messages.filter(message => message.role === "assistant"), event.aborted);
     if (notice) {
       if (ctx.hasUI) ctx.ui.notify(notice, "warning");
       else console.error(`omo-mini: ${notice}`);
