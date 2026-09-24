@@ -61,3 +61,56 @@ index 28e453eb1b9aaa7edcccc0189175b6da97603756..f7d7ea24bdc1f413cd93a4c29250b4e2
  export type BeforeProviderRequestEventResult = unknown;
  export interface ToolCallEventResult {
      /** Block tool execution. To modify arguments, mutate `event.input` in place instead. */
+diff --git a/dist/utils/clipboard-image.d.ts b/dist/utils/clipboard-image.d.ts
+--- a/dist/utils/clipboard-image.d.ts
++++ b/dist/utils/clipboard-image.d.ts
+@@ -2,6 +2,7 @@
+     bytes: Uint8Array;
+     mimeType: string;
+ };
++export declare function readFileDropImage(paths: string[]): Promise<ClipboardImage>;
+ export declare function isWaylandSession(env?: NodeJS.ProcessEnv): boolean;
+ export declare function extensionForImageMimeType(mimeType: string): string | null;
+ export declare function readClipboardImage(options?: {
+diff --git a/dist/utils/clipboard-image.js b/dist/utils/clipboard-image.js
+--- a/dist/utils/clipboard-image.js
++++ b/dist/utils/clipboard-image.js
+@@ -1,5 +1,7 @@
+ import { getNativeClipboard } from "@earendil-works/pi-tui";
+ import { randomUUID } from "crypto";
++import { execFile } from "node:child_process";
++import { promisify } from "node:util";
+ import { readFileSync, unlinkSync } from "fs";
+ import { tmpdir } from "os";
+ import { join } from "path";
+@@ -9,6 +11,21 @@
+ const SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+ const DEFAULT_LIST_TIMEOUT_MS = 1000;
+ const DEFAULT_POWERSHELL_TIMEOUT_MS = 5000;
++const execFileAsync = promisify(execFile);
++/** Explorer Copy produces CF_HDROP, not CF_DIB. Read only; never replace clipboard contents. */
++export async function readFileDropImage(paths) {
++    if (paths.length !== 1 || !/\.(png|jpe?g)$/i.test(paths[0]))
++        throw new Error("Clipboard must contain exactly one PNG or JPEG file");
++    const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Drawing; $f=New-Object System.IO.FileInfo($env:OMO_MINI_DROP_PATH); if(-not $f.Exists -or $f.Length -gt 2097152){throw 'Missing or oversized clipboard image'}; $i=[System.Drawing.Image]::FromFile($f.FullName); try { if($i.Width -lt 1 -or $i.Height -lt 1 -or ([long]$i.Width * $i.Height) -gt 16000000){throw 'Clipboard image dimensions exceed limit'}; $m=New-Object System.IO.MemoryStream; try {$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png); if($m.Length -gt 2097152){throw 'Clipboard image exceeds 2 MiB limit'}; [Convert]::ToBase64String($m.ToArray())} finally {$m.Dispose()} } finally {$i.Dispose()}`;
++    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 20000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, OMO_MINI_DROP_PATH: paths[0] } });
++    return { bytes: Buffer.from(stdout.trim(), "base64"), mimeType: "image/png" };
++}
++async function readWindowsFileDropImage() {
++    const script = `Add-Type -AssemblyName System.Windows.Forms; ConvertTo-Json -Compress -InputObject @([System.Windows.Forms.Clipboard]::GetFileDropList())`;
++    const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-STA", "-NonInteractive", "-Command", script], { timeout: DEFAULT_POWERSHELL_TIMEOUT_MS, windowsHide: true });
++    const paths = JSON.parse(stdout);
++    return paths.length ? readFileDropImage(paths) : null;
++}
+ export function isWaylandSession(env = process.env) {
+     return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland";
+ }
+@@ -211,6 +228,8 @@
+     }
+     else {
+         image = await readClipboardImageViaNativeClipboard();
++        if (!image && platform === "win32")
++            image = await readWindowsFileDropImage();
+     }
+     if (!image) {
+         return null;

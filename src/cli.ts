@@ -41,7 +41,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     const args = [upstreamEntry(), "--offline", "--no-approve", "--no-model-fallback", "--no-recommended-models",
       "--no-extensions", "--no-prompt-templates", "--no-skills", "--omo-senpi-builtin-mcps-disabled",
       "--tools", "read,grep,find,ls,bash,powershell,edit,write",
-      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-memory-disabled",
+      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-memory-disabled", "--omo-senpi-onboarding-disabled",
       "--omo-senpi-lsp-disabled", "--omo-senpi-telemetry-disabled",
       "--extension", extension, "--session-dir", profile.paths.sessions,
       "--provider", "omo-mini-local", "--model", profile.model.id, "--models", `omo-mini-local/${profile.model.id}`,

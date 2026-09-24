@@ -23,7 +23,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
   let nextId = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === "/api/v0/models") return Response.json({ data: [{ id: "boundary-local", state: "loaded", type: "llm", loaded_context_length: 30000, capabilities: ["tool_use"] }] });
+    if (path === "/api/v0/models") return Response.json({ data: [{ id: "boundary-local", state: "loaded", type: "llm", loaded_context_length: 34000, capabilities: ["tool_use"] }] });
     if (path !== "/v1/chat/completions") return new Response("Not Found", { status: 404 });
     requests.push(await request.json() as (typeof requests)[number]);
     const pair = ids[requests.length - 1];
@@ -79,7 +79,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     const extensions = surfaces.data?.["extensions"] as { path: string }[];
     expect(extensions.map(extension => extension.path).some(path => path.includes(global))).toBe(false);
     await prompt("Read public.txt three times using the read tool and report the public value.");
-    expect(requests.length).toBe(4);
+    expect(requests.length, `RPC frames: ${JSON.stringify(frames.slice(-8))}; stderr: ${errors.slice(-1200)}`).toBe(4);
     for (let index = 0; index < 3; index++) {
       const next = requests[index + 1]!.messages;
       expect(next.some(message => message.role === "assistant" && message.tool_calls?.some(call => call.id === ids[index]))).toBe(true);
@@ -90,7 +90,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     const after = await Promise.all([readFile(join(global, "models.json"), "utf8"), readFile(join(global, "settings.json"), "utf8")]);
     const localModels = JSON.parse(await readFile(join(state, "agent", "models.json"), "utf8"));
     const localSettings = await readFile(join(state, "agent", "settings.json"), "utf8");
-    const receipt = { invocation: "bun test tests/native-boundaries.test.ts (native src/cli.ts rpc, disposable root/state, 127.0.0.1 ephemeral SSE)", context: 30000,
+    const receipt = { invocation: "bun test tests/native-boundaries.test.ts (native src/cli.ts rpc, disposable root/state, 127.0.0.1 ephemeral SSE)", context: 34000,
       toolPairIds: ids, generationRequests: requests.length, finalRequestBytes: Buffer.byteLength(JSON.stringify(requests.at(-1))),
       pairsOnNextWire: ids.map((id, index) => ({ id, call: requests[index + 1]?.messages.some(m => m.role === "assistant" && m.tool_calls?.some(c => c.id === id)), result: requests[index + 1]?.messages.some(m => m.role === "tool" && m.tool_call_id === id) })),
       finalRequestPairs: ids.map(id => ({ id, call: requests.at(-1)?.messages.some(m => m.role === "assistant" && m.tool_calls?.some(c => c.id === id)), result: requests.at(-1)?.messages.some(m => m.role === "tool" && m.tool_call_id === id) })),
