@@ -1,6 +1,6 @@
 # Third-party attribution
 
-Planned engine dependency: [Senpi](https://github.com/code-yeongyu/senpi), package `@code-yeongyu/senpi`. The public Senpi repository reports an MIT license. No Senpi sources or binaries are included in this foundation. If a future distribution includes Senpi or substantial portions of it, retain its copyright and permission notice as required by its MIT license.
+Engine dependencies: `@earendil-works/pi-agent-core@0.87.1` and `@earendil-works/pi-ai@0.87.1`, public Senpi/pi engine packages. Registry metadata reports both as MIT-licensed. Their full upstream Senpi project is [code-yeongyu/senpi](https://github.com/code-yeongyu/senpi), also MIT. Runtime dependencies are installed independently; no OmO plugin or restricted OmO sources are copied. Retain upstream copyright and permission notices in redistributed dependency packages or bundles as required by MIT.
 
 Senpi's upstream license notice (retrieved from the public repository on 2026-09-24):
 
