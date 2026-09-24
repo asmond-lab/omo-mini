@@ -1,0 +1,7 @@
+# Pinned provider-request rejection patch
+
+This project patches MIT-licensed `@code-yeongyu/senpi@2026.9.23-5` (copyright its upstream contributors; license in its installed `LICENSE`) and `omo-ai@5.0.0-0.beta.88` using Bun's `patchedDependencies`. No OmO SUL code is relicensed. Apply with `bun install --frozen-lockfile` from this project; do not install or patch the global engine.
+
+Senpi's `before_provider_request` previously logged and ignored *all* handler exceptions, including the local profile's budget rejection. The project patch makes a handler's explicit `{ action: "reject", reason: string }` result throw outside that exception logger, so the pending `onPayload` rejects before the provider transport. Ordinary thrown extension errors still log and are ignored. The omo-ai launcher normally prefers Senpi's prelinked bundle, which contains its own unpatched runner; the second patch selects Senpi's unbundled `dist/cli.js` to ensure this patch is actually executed. The profile extension converts only `MiniError` policy failures into the explicit result.
+
+`bun test tests/provider-rejection.test.ts` drives the real CLI against a loopback HTTP model endpoint. With a bounded local model it confirms the rejection text and zero `/v1/chat/completions` requests; with a larger local context it confirms a single successful generation request. The sentinel is an intentional rejection result, not an error-name or message matching heuristic.
