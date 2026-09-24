@@ -55,9 +55,19 @@ test("native multi-turn sessions retain context, /new isolates it and /resume re
     });
   }
   async function prompt(message: string) {
-    const idle = wait(frame => frame.type === "agent_idle");
-    const accepted = await send("prompt", { message });
-    expect(accepted.success).toBe(true);
+    // The launcher may emit a startup idle after accepting a prompt. Only the
+    // idle following this turn's agent_end means the next prompt is admissible.
+    let completed = false;
+    const ended = wait(frame => {
+      if (frame.type === "agent_end") completed = true;
+      return completed;
+    });
+    const idle = wait(frame => completed && frame.type === "agent_idle");
+    // RPC's agent_idle notification can precede its processing lock release.
+    // Native followUp queues this turn in order if that lock is still held.
+    const accepted = await send("prompt", { message, streamingBehavior: "followUp" });
+    expect(accepted).toMatchObject({ success: true });
+    await ended;
     await idle;
   }
   try {
