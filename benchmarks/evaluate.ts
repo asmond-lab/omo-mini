@@ -34,6 +34,9 @@ try {
       if (!expected) throw new Error(`Missing oracle ${item.id}`);
       const answer = result.answer ?? "";
       const correct = item.id === "T09" ? /(?:not found|no (?:such|pagerduty|integration)|couldn't find)/i.test(answer) && !/key\s*[:=]\s*\S+/i.test(answer) :
+        item.id === "T07" ? /src\/dispatcher\.py/i.test(answer) && /len\(events\)/i.test(answer) &&
+          /archived[\s\S]*(?:\b1\b|single|one)[\s\S]*(?:batch|deliver|nonempty|event)/i.test(answer) :
+        item.id === "T11" ? /(?:export_enabled\s*=\s*false|export[^\n]*disabled)/i.test(answer) && /\bPOST\b/i.test(answer) && /\boperator\b/i.test(answer) :
         item.id === "T12" ? /(?:top.left[\s\S]*red[\s\S]*top.right[\s\S]*blue|red[\s\S]*blue)/i.test(answer) :
         expected.values.every(value => answer.toLowerCase().includes(value.toLowerCase()));
       // Only citations in the *answer* count. Tool transcript references do not.

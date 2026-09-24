@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
-import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, symlink, rm, copyFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chooseModel, checkBudget, MiniError } from "../src/local.ts";
 import { confined, readScoped, searchScoped, workspace } from "../src/tools.ts";
-import { pngAttachment, parseClipboard } from "../src/clipboard.ts";
+import { pngAttachment, parseClipboard, fileDropAttachment } from "../src/clipboard.ts";
 import { InputAssembler } from "../src/input.ts";
 import { parseArgs } from "../src/cli.ts";
 
@@ -58,6 +58,39 @@ test("clipboard rejects empty and oversized input and retains text once with ima
   expect(() => parseClipboard({ text: "x".repeat(65537), image: null })).toThrow("64 KiB");
   expect(() => parseClipboard({ text: "hello", image: "not-png" })).toThrow("Expected PNG");
   expect(parseClipboard({ text: "first\n猫", image: null }).text).toBe("first\n猫");
+});
+
+test("FileDrop decodes one real PNG, preserves Unicode text and rejects unsupported/invalid entries", async () => {
+  if (process.platform !== "win32") return;
+  const dir = await mkdtemp(join(tmpdir(), "omo-mini-images-"));
+  try {
+    const path = join(dir, "picture.png");
+    const original = await readFile(join(import.meta.dir, "../fixtures/tiny/image.png"));
+    await copyFile(join(import.meta.dir, "../fixtures/tiny/image.png"), path);
+    const value = parseClipboard({ text: "猫\n하늘", image: null, fileDrop: [path] });
+    expect(value.text).toBe("猫\n하늘");
+    const attachment = await fileDropAttachment(value.fileDrop!);
+    expect([attachment.width, attachment.height]).toEqual([420, 120]);
+    expect(Buffer.from(attachment.image.data, "base64").subarray(0, 8)).toEqual(original.subarray(0, 8));
+    const jpeg = join(dir, "picture.jpg");
+    const conversion = Bun.spawnSync(["powershell.exe", "-NoProfile", "-Command", "Add-Type -AssemblyName System.Drawing; $i=[System.Drawing.Image]::FromFile($env:OMO_SRC); try{$i.Save($env:OMO_DST,[System.Drawing.Imaging.ImageFormat]::Jpeg)}finally{$i.Dispose()}"], { env: { ...process.env, OMO_SRC: path, OMO_DST: jpeg } });
+    expect(conversion.exitCode).toBe(0);
+    expect((await fileDropAttachment([jpeg])).width).toBe(420);
+    const huge = join(dir, "dimensions.png");
+    const generated = Bun.spawnSync(["powershell.exe", "-NoProfile", "-Command", "Add-Type -AssemblyName System.Drawing; $i=New-Object System.Drawing.Bitmap(4001,4000); try{$i.Save($env:OMO_DST,[System.Drawing.Imaging.ImageFormat]::Png)}finally{$i.Dispose()}"], { env: { ...process.env, OMO_DST: huge } });
+    expect(generated.exitCode).toBe(0);
+    await expect(fileDropAttachment([huge])).rejects.toThrow("dimensions");
+    await expect(fileDropAttachment([])).rejects.toThrow("exactly one");
+    await expect(fileDropAttachment([path, path])).rejects.toThrow("exactly one");
+    await expect(fileDropAttachment([join(dir, "missing.png")])).rejects.toThrow("missing");
+    await writeFile(join(dir, "notes.txt"), "private text");
+    await expect(fileDropAttachment([join(dir, "notes.txt")])).rejects.toThrow("PNG or JPEG");
+    await writeFile(join(dir, "fake.png"), original.subarray(0, 24));
+    await expect(fileDropAttachment([join(dir, "fake.png")])).rejects.toThrow("decode");
+    await writeFile(join(dir, "large.png"), Buffer.alloc(2 * 1024 * 1024 + 1));
+    await expect(fileDropAttachment([join(dir, "large.png")])).rejects.toThrow("large");
+    expect(() => parseClipboard({ text: "", image: null, fileDrop: [path, path] })).not.toThrow();
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test("multiline Unicode paste retains line breaks as one task", () => {

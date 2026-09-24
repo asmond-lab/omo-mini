@@ -50,12 +50,12 @@ export function sdkModel(selected: LocalModel, baseUrl: string): Model<"openai-c
     id: selected.id, name: selected.id, api: "openai-completions", provider: "local",
     baseUrl: new URL("/v1", baseUrl).href, reasoning: false, input: selected.type === "vlm" ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: context, maxTokens: Math.min(1024, Math.max(1, context - 2048)),
+    contextWindow: context, maxTokens: Math.min(2048, Math.max(1, context - 3072)),
   };
 }
 
 /** Conservative text-byte proxy plus a tile-based image-token estimate, not exact provider tokenization. */
-export function checkBudget(request: unknown, contextWindow: number, outputReserve = 1536): number {
+export function checkBudget(request: unknown, contextWindow: number, outputReserve = 2560): number {
   let imageCost = 0;
   const serialized = JSON.stringify(request, (key, value: unknown) => {
     if (key === "data" && typeof value === "string" && value.length > 32 && value.startsWith("iVBORw0KGgo")) {

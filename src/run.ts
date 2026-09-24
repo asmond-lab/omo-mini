@@ -20,7 +20,9 @@ export async function runTask(config: { readonly root: string; readonly task: st
   const root = await workspace(config.root);
   const model = sdkModel(config.selected, config.baseUrl);
   const records: ToolRecord[] = [];
-  const prompt = config.strategy === "grounded" ? GROUNDED : PROMPT;
+  const prompt = config.images?.length
+    ? "You are omo-mini. Answer the user's image question from the attached image pixels. Use workspace tools only if the question also requires workspace evidence; cite file:line only for claims from tool output. Keep the answer concise."
+    : config.strategy === "grounded" ? GROUNDED : PROMPT;
   const requestBytes: number[] = [];
   let requests = 0;
   let failures = 0;
