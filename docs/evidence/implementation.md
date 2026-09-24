@@ -1,5 +1,7 @@
 # Implementation smoke (2026-09-24)
 
+> Archival v0.1 bare-Agent evidence only. The commands and output below do **not** describe the current OmO-native v0.2 launcher; see the root README for current usage.
+
 Windows x64, Bun 1.4.0. The endpoint below was the user's already-running local OpenAI-compatible service; no local model was loaded or changed by this project. Model identifier and machine-specific paths are intentionally omitted from this public evidence.
 
 - `bun run typecheck` -> exit 0.

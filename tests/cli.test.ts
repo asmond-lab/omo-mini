@@ -19,14 +19,37 @@ test("real CLI JSON over-context fails before inference", async () => {
   try {
     const proc = Bun.spawn([process.execPath, "src/cli.ts", "run", "--root", root, "--task", "x".repeat(3000), "--base-url", `http://127.0.0.1:${server.port}/v1`, "--json"],
       { cwd: resolve(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
-    const [out, exit] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    const result = JSON.parse(out);
-    expect(exit).toBe(1);
-    expect(result.reason).toBe("error");
-    expect(result.error.code).toBe("model_admission");
-    expect(inference).toBe(0);
+    // Windows CI cold startup can exceed Bun's default 5s test limit. Bound the
+    // integration itself, and always reap the owned child on deadline/failure.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const [out, err, exit] = await Promise.race([
+        Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]),
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(() => reject(new Error("CLI admission exceeded 12s integration deadline")), 12000);
+        }),
+      ]);
+      let result: { reason?: string; error?: { code?: string } };
+      try { result = JSON.parse(out); }
+      catch (error) { throw new Error(`Malformed CLI JSON (exit ${exit}, stdout ${JSON.stringify(out.slice(-1000))}, stderr ${JSON.stringify(err.slice(-1000))}): ${String(error)}`); }
+      expect(exit).toBe(1);
+      expect(result.reason).toBe("error");
+      expect(result.error?.code).toBe("model_admission");
+      expect(inference).toBe(0);
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      if (proc.exitCode === null) {
+        proc.kill();
+        let reapDeadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([proc.exited, new Promise<never>((_resolve, reject) => {
+            reapDeadline = setTimeout(() => reject(new Error("CLI child did not exit after cleanup signal")), 3000);
+          })]);
+        } finally { if (reapDeadline) clearTimeout(reapDeadline); }
+      }
+    }
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
-});
+}, 20000);
 
 test("repeated invalid tool calls stop after three errors", async () => {
   const root = await mkdtemp(join(tmpdir(), "omo-cli-tool-errors-"));

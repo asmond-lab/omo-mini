@@ -40,6 +40,7 @@ export function profileEnvironment(original: NodeJS.ProcessEnv, paths: ReturnTyp
   env["OMO_MINI_BASE_URL"] = new URL("/v1", baseUrl).href;
   env["OMO_MINI_ROOT"] = root;
   env["PI_OFFLINE"] = "1";
+  env["OMO_MINI_LOCAL_PROFILE"] = "1";
   return env;
 }
 

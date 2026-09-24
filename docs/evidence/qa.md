@@ -1,5 +1,7 @@
 # Independent QA and evaluation (2026-09-24)
 
+> Archival v0.1 bare-Agent evidence only. Commands below (especially `--clipboard --json`) are **not** supported instructions for the current OmO-native v0.2 launcher. See the root README for current usage.
+
 Windows x64, Bun 1.4.0; local already-loaded tool/vision-capable model, loaded context 69,376. No OmO/LM Studio settings were changed. `bun link` registered the independent command in Bun's user bin; `command -v omo-mini` resolved there. The clipboard was only read, never cleared/replaced. No private clipboard content or machine-specific path appears here or in `performance.json`.
 
 ## Executable surface

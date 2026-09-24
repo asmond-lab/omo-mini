@@ -37,6 +37,18 @@ index e09f1618a49ec3b830d8adadbf52baf1d93c4574..d31bcc0d69389cd4f0a72ff6d93df465
                  }
              }
          }
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -391,5 +391,8 @@
+         registerMcpServer(name, config) {
+             runtime.assertActive();
++            // omo-mini's isolated offline profile must not register OmO's remote MCPs.
++            if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && (name === "context7" || name === "grep_app"))
++                return;
+             const error = validateMcpServerDeclaration(name, config);
+             if (error) {
+                 throw new Error(error);
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
 index 28e453eb1b9aaa7edcccc0189175b6da97603756..f7d7ea24bdc1f413cd93a4c29250b4e2a1015e82 100644
 --- a/dist/core/extensions/types.d.ts
