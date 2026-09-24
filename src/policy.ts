@@ -30,18 +30,25 @@ export function checkProviderRequest(model: { readonly provider: string; readonl
 export const MAX_TURN_REQUESTS = 12;
 export const MAX_TOOL_ERRORS = 5;
 
-export function compactPrompt(options: { cwd: string; selectedTools?: string[]; toolSnippets?: Record<string, string>; promptGuidelines?: string[]; appendSystemPrompt?: string; contextFiles?: { path: string; content: string }[]; skills?: { name: string; description: string; filePath: string; disableModelInvocation: boolean }[] }, allowed: LocalIdentity): string {
+export function compactPrompt(options: { cwd: string; selectedTools?: string[]; toolSnippets?: Record<string, string>; promptGuidelines?: string[]; appendSystemPrompt?: string; contextFiles?: { path: string; content: string }[]; skills?: { name: string; description: string; filePath: string; disableModelInvocation: boolean }[] }, allowed: LocalIdentity, incoming = ""): string {
   const tools = options.selectedTools ?? [];
   const snippets = tools.filter(name => options.toolSnippets?.[name]).map(name => `- ${name}: ${options.toolSnippets![name]}`).join("\n");
   const instructions = options.contextFiles?.map(file => `<project_instructions path=${JSON.stringify(file.path)}>\n${file.content}\n</project_instructions>`).join("\n") ?? "";
-  const skills = options.skills?.filter(skill => !skill.disableModelInvocation).map(skill => `- ${skill.name}: ${skill.description} (${skill.filePath})`).join("\n") ?? "";
+  // The plugin and builtin todo hooks may run before this hook. Retain only
+  // their live sections, never the entire upstream static prompt.
+  const memory = incoming.match(/<!-- senpi-memory:[^:\r\n]+:begin -->[\s\S]*?<!-- senpi-memory:[^:\r\n]+:end -->/)?.[0];
+  const projection = memory && Buffer.byteLength(memory, "utf8") <= 4096
+    ? memory.replace(/Reminder: <projection>[^\n]*\n(?:\n)?/, "")
+    : memory ? "Memory projection exceeds 4096 bytes; inspect /memory for the committed contents." : "";
+  const taskGuidance = incoming.match(/<Task_Management>[\s\S]*?<\/Task_Management>/)?.[0];
   return [`You are OmO, a local coding assistant. Model: ${allowed.model}. Loaded context: ${allowed.context}. Workspace: ${allowed.root}. These are runtime facts, not repository facts.`,
     "For greetings or questions solely about the loaded model or workspace, answer directly using the exact runtime model ID and canonical workspace path above; do not call tools or inspect environment variables. On Windows, a shell's /c/... path is only an alias, not the canonical C:\\... workspace path. Answer conversation-history questions from this conversation, not workspace searches. For code tasks use native tools as needed; verify changes. State uncertainty and failures honestly. If information is absent after a focused search, say it is not found rather than searching indefinitely. No cloud fallback.",
     "Native tools (subject to host permissions):", tools.join(", "), snippets,
-    ...(options.promptGuidelines?.length ? ["Tool guidelines:", ...options.promptGuidelines] : []),
+    "Use create_goal/update_goal/get_goal and todo for ongoing work; keep the goal, observed tool results, blockers and next action current. Resume the selected session for its task; /new starts a fresh task. An intention or todo marked done is not proof of execution. Write only intentionally durable same-project facts with memory; /memory inspects and memory delete forgets. /memfs init initializes local storage when needed. Never sync or publish memory.",
+    ...(projection ? [projection] : []), ...(taskGuidance ? [taskGuidance] : []),
+    ...(options.promptGuidelines?.length ? ["Tool guidelines:", ...options.promptGuidelines.filter(line => !line.startsWith("Record durable facts,"))] : []),
     ...(options.appendSystemPrompt ? [options.appendSystemPrompt] : []),
     ...(instructions ? ["Project instructions:", instructions] : []),
-    ...(skills ? ["Available skills (read the file when relevant):", skills] : []),
     `Current working directory: ${options.cwd}`].join("\n\n");
 }
 
@@ -55,6 +62,35 @@ export class TurnBudget {
     if (this.toolErrors >= MAX_TOOL_ERRORS) return `Local turn stopped after ${MAX_TOOL_ERRORS} consecutive tool errors; answer not completed`;
     this.requests++;
     return undefined;
+  }
+}
+
+// Only observed native errors establish a failed action. A successful coding action
+// may change the environment; inspection and task/memory bookkeeping cannot establish
+// remediation of a failed command. No command-text inference is attempted.
+const PROGRESS_TOOLS = new Set(["bash", "powershell", "edit", "write"]);
+export class FailedActionGuard {
+  private readonly failed = new Set<string>();
+  private blocked = 0;
+  private readonly pending = new Map<string, { action: string; tool: string }>();
+  get stopped(): boolean { return this.blocked >= 3; }
+
+  reset(): void { this.failed.clear(); this.blocked = 0; this.pending.clear(); }
+  call(id: string, tool: string, input: Record<string, unknown>): { block: true; reason: string; terminate: boolean } | undefined {
+    const action = JSON.stringify([tool, input]);
+    if (this.failed.has(action)) {
+      this.blocked++;
+      return { block: true, reason: "Repeated failed tool action blocked before execution. The previous execution returned an error; use a materially different tool or arguments, or report that the work is unfinished.", terminate: this.blocked >= 3 };
+    }
+    this.pending.set(id, { action, tool });
+    return undefined;
+  }
+  result(id: string, isError: boolean): void {
+    const pending = this.pending.get(id);
+    if (pending === undefined) return; // A blocked call still receives a native tool-result pair.
+    this.pending.delete(id);
+    if (isError) this.failed.add(pending.action);
+    else if (PROGRESS_TOOLS.has(pending.tool)) { this.failed.clear(); this.blocked = 0; }
   }
 }
 
