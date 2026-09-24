@@ -1,0 +1,27 @@
+# Independent QA and evaluation (2026-09-24)
+
+Windows x64, Bun 1.4.0; local already-loaded tool/vision-capable model, loaded context 69,376. No OmO/LM Studio settings were changed. `bun link` registered the independent command in Bun's user bin; `command -v omo-mini` resolved there. The clipboard was only read, never cleared/replaced. No private clipboard content or machine-specific path appears here or in `performance.json`.
+
+## Executable surface
+
+- `omo-mini --help` exit 0; `omo-mini doctor --json` exit 0 with `reachable=true`, `toolCapable=true`, `loadedContext=69376`.
+- `omo-mini run --root fixtures/tiny --task 'Find invoiceTotal using tools; cite path and line and exact expression.' --json` exit 0, `reason=stop`, search and read tools returned `src/ledger.ts:1-2`, answer `return base + handling;`; 3 model requests, 1,697 input / 241 output tokens, 3,127 ms (pre-fix smoke). No edit/shell tool is available.
+- `omo-mini run --root fixtures/tiny --task 'Read exact words and number in attached image; do not use tools.' --image image.png --json` exit 0; **BLUE CAT 17** from the actual 420x120 PNG image, 1 request, 490 input / 116 output tokens, 1,476 ms. SDK wire test asserts an actual `data:image/png;base64,...` image part, not an image filename.
+- `--model NOT_LOADED --json` exit 1, structured `model_unavailable`; invalid strategy exit 1, structured `arguments`; `--image ../outside.png --json` exit 1, structured `path`/`Path escapes workspace`. Streamed tool calls, symlink escape, nonexistent path sanitization, full prompt/schema budget, pre-aborted signal, open-stream deadline and three-error cap have tests. Over-context **real CLI process** test returns error before any inference POST.
+- ConPTY (`node-pty`) exercised built CLI in a real xterm-compatible TTY: bracketed paste markers split across write chunks, one multiline Unicode prompt containing `猫` and a second line, grounded answer, `/quit`, exit 0. A second ConPTY run submitted a task, sent raw Ctrl+C while active, observed another prompt without an answer, then `/quit`, exit 0. Terminal OSC title and any private paths were removed from this public summary. PTY processes exited; benchmark temporary fixture was deleted in `finally`.
+- `systemClipboard()` returned `readable=true`, `textBytes=6`, `hasImage=false` for the *current* Windows clipboard. No clipboard text was printed, transmitted to a model or committed. An explicit PowerShell UTF-8 JSON output probe with public `猫\n하늘` round-tripped; this probes encoding, not the actual clipboard's Unicode content.
+
+**Unverified real-OS surface:** clipboard image paste. Current clipboard contained text, not image. Synthetic adapter and SDK wire tests plus `--image` live vision are **not** evidence that a real Windows clipboard image reaches the model. Minimal human-controlled step: open public `fixtures/tiny/image.png` in Paint, select all and copy pixels (not the file icon); run `omo-mini run --root fixtures/tiny --task 'Read the exact words and number in this image; do not use tools.' --clipboard --json`. Look for `Clipboard image: 420x120 PNG` on stderr and `BLUE CAT 17` in JSON answer. The user controls when to replace their clipboard and can restore it afterward. Product code only reads.
+
+## Sequential baseline/candidate evaluation
+
+`python benchmarks/corpus/validate.py` -> PASS, 12 tasks, 12 fixture files, 23 citation spans, PNG pixels verified. `bun benchmarks/evaluate.ts` runs actual built CLI serially over the same public tasks: 11 original file questions and one image-attachment adaptation of T12 (decoded externally, then model sees pixels and an explicit visual question; **not** a claim that read/search tools decode base64). Each variant sees a fresh task context, the same fixture copy as root and the same question set; the oracle/questions never enter the model root. `performance.json` contains per-task answers, answer-only citation scores, valid/invalid tool calls, provider usage, elapsed milliseconds and serialized request-byte sizes. Citations in tool transcripts alone never score; T12 image has no textual citation obligation, so 22 answer citation spans are scored. Usage and elapsed time vary with local load and stochastic generation. Values are substring/semantic checks, not strict sentence equality.
+
+| Strategy | Correct/12 | Answer citations/22 | Valid/invalid calls | Total latency | Input/output tokens | Request bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline (default) | 11 | 13 | 60 / 0 | 87,721 ms | 46,243 / 6,804 | 271,340 |
+| grounded (general citation/active-source instruction) | 7 | 16 | 72 / 0 | 118,762 ms | 56,855 / 8,873 | 347,519 |
+
+Baseline met the 90% useful-answer target (11/12), but did **not** answer the no-match PagerDuty case: it reached the bounded eight-request cap. Grounded improved citation coverage while materially reducing value accuracy and increasing latency; it also failed that no-match case and its image answer ended with `length`. Keep baseline as default. This is a local measured decision, not a universal optimality claim. The 69,376 context value and vision patch-cost estimate are service-specific; PNG byte/megapixel acceptance never promises context acceptance.
+
+Verification: `bun run typecheck` exit 0, `bun test` 20/20 pass, `bun run build` exit 0, `git diff --check` exit 0. The corpus validator passed. No PR or merge was created.

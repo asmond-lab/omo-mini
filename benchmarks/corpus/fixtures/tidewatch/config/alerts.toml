@@ -1,0 +1,10 @@
+# Per-region alert thresholds, in centimeters.
+[regions.north]
+threshold_cm = 180
+severity = "critical"
+
+[regions.south]
+threshold_cm = 240
+severity = "warning"
+
+default_route = "operations"

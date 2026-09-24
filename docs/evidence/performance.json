@@ -1,0 +1,619 @@
+{
+  "version": "0.1.0",
+  "fixture": "public Tidewatch (11 file questions + 1 image attachment)",
+  "runs": [
+    {
+      "strategy": "baseline",
+      "results": [
+        {
+          "id": "T01",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "The active Tidewatch deployment listens on **port 4182**.\n\nSource: `config\\runtime.toml:4` - `port = 4182`",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 2,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1678,
+            2952,
+            4284
+          ],
+          "usage": {
+            "input": 1824,
+            "output": 252
+          },
+          "elapsedMs": 3184
+        },
+        {
+          "id": "T02",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Active server bind address:** `127.0.0.1` (from `config/runtime.toml:3`) - confirmed by comment \"Active deployment settings for Tidewatch.\"\n\n**Sample server bind address:** `0.0.0.0` (from `config/runtime.sample.toml:3`) - confirmed by comment \"Example settings, not loaded by the active deployment.\"",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1687,
+            3157,
+            4492,
+            5625,
+            7982
+          ],
+          "usage": {
+            "input": 3855,
+            "output": 759
+          },
+          "elapsedMs": 8893
+        },
+        {
+          "id": "T03",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Channel:** `slack` (from `config/runtime.toml:11`)\n\n**Destination:** `#tide-critical` (from `src/channels.py:3-4`, which maps \"critical\" severity to this Slack channel)\n\nThe active dispatcher (`src/dispatcher.py:5-7`) uses the configured delivery channel and resolves it through `resolve_channel()` in `channels.py`, which returns `\"#tide-critical\"` for critical alerts on the slack channel.",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 4,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 8,
+          "requestBytes": [
+            1741,
+            2963,
+            3949,
+            4886,
+            6188,
+            7525,
+            9005,
+            10346
+          ],
+          "usage": {
+            "input": 7009,
+            "output": 681
+          },
+          "elapsedMs": 8892
+        },
+        {
+          "id": "T04",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n**Station ST-03:**\n- **River:** Cedar (from `data\\stations.csv` line 4)\n- **Region's Alert Threshold:** 180 cm (from `config\\alerts.toml` lines 2-3, which shows the north region threshold)",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 5,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            1716,
+            2962,
+            4199,
+            5274,
+            6313,
+            7551
+          ],
+          "usage": {
+            "input": 4884,
+            "output": 584
+          },
+          "elapsedMs": 7774
+        },
+        {
+          "id": "T05",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n**Station ST-02:**\n- **River:** Brook (from `data\\stations.csv:3`)\n- **Region Threshold:** 240 cm (from `config\\alerts.toml:7`, for regions.south)\n- **Severity:** warning (from `config\\alerts.toml:8`, for regions.south)",
+          "correct": true,
+          "citations": 3,
+          "expectedCitations": 3,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1705,
+            2822,
+            4036,
+            5352,
+            6580
+          ],
+          "usage": {
+            "input": 3758,
+            "output": 552
+          },
+          "elapsedMs": 7271
+        },
+        {
+          "id": "T06",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file contents:\n\n**Active storage retention days:** 14 (from `src\\storage.py`, line 3, in the \"Active storage policy\" module)\n\n**Retired prototype retention days:** 90 (from `archive\\runtime.toml`, line 8; note that line 1 indicates this is a \"Retired prototype; do not use for current settings\")",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 2,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            1718,
+            3219,
+            4203,
+            5608,
+            7519
+          ],
+          "usage": {
+            "input": 3634,
+            "output": 586
+          },
+          "elapsedMs": 7583
+        },
+        {
+          "id": "T07",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files:\n\n**Active Scheduler Selection:**\nFrom `config/runtime.toml` (line 8), the active scheduler selects **`src/dispatcher.py`**.\n\n**Delivery Count Comparison for Nonempty Events:**\n\n| Dispatcher | Delivery Count Logic | Result for Nonempty Events |\n|------------|---------------------|---------------------------|\n| **Active** (`src/dispatcher.py`, line 12) | `return len(events)` | **N deliveries** (one per event) |\n| **Archived** (`archive/dispatcher.py`, line 6) | `return 1 if events else 0` | **1 delivery** (batched all as one) |\n\n**Difference:** The active dispatcher delivers once per event, while the archived prototype batches all nonempty events into a single delivery. For *n* nonempty events, the difference is **n - 1 additional deliveries** with the active scheduler.",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 3,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1761,
+            3968,
+            6581,
+            8026
+          ],
+          "usage": {
+            "input": 3712,
+            "output": 769
+          },
+          "elapsedMs": 9701
+        },
+        {
+          "id": "T08",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence, the **stations summary** route (`/stations/summary`) requires:\n\n| Property | Value | Source |\n|----------|-------|--------|\n| HTTP Method | `GET` | `src/routes.py:5` |\n| Role | `analyst` | `src/routes.py:5` |",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1686,
+            2814,
+            3990,
+            5501
+          ],
+          "usage": {
+            "input": 2569,
+            "output": 369
+          },
+          "elapsedMs": 5434
+        },
+        {
+          "id": "T09",
+          "exit": 1,
+          "reason": "error",
+          "answer": "",
+          "correct": false,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 8,
+          "invalidCalls": 0,
+          "requests": 9,
+          "requestBytes": [
+            1733,
+            2882,
+            3917,
+            4899,
+            5947,
+            6985,
+            8011,
+            9135
+          ],
+          "usage": {
+            "input": 6379,
+            "output": 631
+          },
+          "elapsedMs": 8275,
+          "error": "Maximum of 8 model requests reached"
+        },
+        {
+          "id": "T10",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the search results:\n\n| Question | Answer | Source |\n|----------|--------|--------|\n| On-call escalation email | `harbor-desk@tidewatch.example` | `docs\\runbook.md:6` |\n| Command to inspect ST-01 snapshot | `twctl snapshot show ST-01` | `docs\\runbook.md:7` |",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 3,
+          "requestBytes": [
+            1706,
+            3253,
+            4919
+          ],
+          "usage": {
+            "input": 1923,
+            "output": 383
+          },
+          "elapsedMs": 4869
+        },
+        {
+          "id": "T11",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n**Is export enabled?** No, it is disabled.\n- **File:** `config/runtime.toml:12` - `export_enabled = false`\n\n**Export route specification:**\n- **Method:** POST\n- **Role:** operator\n- **File:** `src/routes.py:6` - `(\"POST\", \"/stations/export\", \"operator\")`",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1719,
+            2980,
+            4256,
+            5608
+          ],
+          "usage": {
+            "input": 2752,
+            "output": 359
+          },
+          "elapsedMs": 4772
+        },
+        {
+          "id": "T12",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the visual inspection of the provided PNG image:\n\n*   **Top-left pixel:** Red\n*   **Top-right pixel:** Blue",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1897,
+            4245,
+            6204,
+            7480
+          ],
+          "usage": {
+            "input": 3944,
+            "output": 879
+          },
+          "elapsedMs": 11073
+        }
+      ],
+      "summary": {
+        "correct": 11,
+        "citationSpans": 13,
+        "expectedCitationSpans": 22,
+        "validCalls": 60,
+        "invalidCalls": 0,
+        "elapsedMs": 87721,
+        "requestBytes": 271340,
+        "providerInput": 46243,
+        "providerOutput": 6804
+      }
+    },
+    {
+      "strategy": "grounded",
+      "results": [
+        {
+          "id": "T01",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the active configuration, the Tidewatch deployment listens on **port 4182**.\n\n**Evidence:**\n- `config\\runtime.toml:3-4`: The `[server]` section defines `bind = \"127.0.0.1\"` and `port = 4182`.\n- `docs\\runbook.md:3`: Confirms that `config/runtime.toml` is the active configuration (sample/archive are reference only).",
+          "correct": true,
+          "citations": 0,
+          "expectedCitations": 1,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            1994,
+            3322,
+            4709,
+            6331
+          ],
+          "usage": {
+            "input": 3038,
+            "output": 454
+          },
+          "elapsedMs": 6117
+        },
+        {
+          "id": "T02",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n**Active server bind address:** `0.0.0.0` (from `archive/runtime.toml:3`)\n- Note: Line 1 of this file says \"# Retired prototype; do not use for current settings,\" but it's still named without `.sample`, suggesting it may be the active runtime config despite the comment.\n\n**Sample server bind address:** `0.0.0.0` (from `config/runtime.sample.toml:3`)\n- Line 1 confirms: \"# Example settings, not loaded by the active deployment.\"\n\nBoth configurations show the same bind address of `\"0.0.0.0\"`, though they differ in port (`3111` vs `9000`) and other scheduler settings.",
+          "correct": false,
+          "citations": 1,
+          "expectedCitations": 2,
+          "validCalls": 8,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            2003,
+            3495,
+            4829,
+            6244,
+            8187
+          ],
+          "usage": {
+            "input": 3922,
+            "output": 827
+          },
+          "elapsedMs": 10985
+        },
+        {
+          "id": "T03",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration files, here's what the active dispatcher uses for a **critical alert**:\n\n| Property | Value | Citation |\n|----------|-------|----------|\n| **Active Dispatcher** | `src/dispatcher.py` | `config/runtime.toml:8` |\n| **Delivery Channel** | `slack` | `config/runtime.toml:11` |\n| **Destination** | `#tide-critical` | `src/channels.py:3` (resolved via `resolve_channel`) |\n\nThe flow is:\n1. The active dispatcher (`src/dispatcher.py`, line 8) calls `send_alert()` with the configured channel\n2. The configured delivery channel from `config/runtime.toml` is `\"slack\"` (line 11)\n3. For severity `\"critical\"`, `resolve_channel()` in `src/channels.py` returns `\"#tide-critical\"` (lines 9-10, mapping to line 3's definition)",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 4,
+          "validCalls": 10,
+          "invalidCalls": 0,
+          "requests": 8,
+          "requestBytes": [
+            2057,
+            3268,
+            4225,
+            5802,
+            7744,
+            9691,
+            11341,
+            12390
+          ],
+          "usage": {
+            "input": 8734,
+            "output": 1071
+          },
+          "elapsedMs": 14743
+        },
+        {
+          "id": "T04",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the workspace files:\n\n**River:** Cedar  \n*Citation:* `data\\stations.csv:4` - \"ST-03,north,Cedar\"\n\n**Region's Alert Threshold:** 180 cm  \n*Citation:* `config\\alerts.toml:3` - The north region (where ST-03 is located) has `threshold_cm = 180`",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 5,
+          "invalidCalls": 0,
+          "requests": 6,
+          "requestBytes": [
+            2032,
+            3248,
+            4478,
+            5611,
+            6687,
+            7928
+          ],
+          "usage": {
+            "input": 5057,
+            "output": 637
+          },
+          "elapsedMs": 8534
+        },
+        {
+          "id": "T05",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the file evidence:\n\n**Station ST-02:**\n- **River:** Brook — from `data\\stations.csv:3` (\"ST-02,south,Brook\")\n- **Region threshold:** 240 cm — from `config\\alerts.toml:7` (south region configuration)\n- **Severity:** warning — from `config\\alerts.toml:8` (south region severity setting)\n\nSince ST-02 is in the south region, it inherits the south region's threshold and severity settings.",
+          "correct": true,
+          "citations": 3,
+          "expectedCitations": 3,
+          "validCalls": 4,
+          "invalidCalls": 0,
+          "requests": 5,
+          "requestBytes": [
+            2021,
+            3207,
+            4455,
+            5609,
+            6891
+          ],
+          "usage": {
+            "input": 3920,
+            "output": 622
+          },
+          "elapsedMs": 8266
+        },
+        {
+          "id": "T06",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on my investigation of the workspace files:\n\n**Active storage retention days:** 14\n- Source: `src\\storage.py:3` - `RETENTION_DAYS = 14` (file marked as \"Active storage policy\" at line 1)\n\n**Retired prototype retention days:** 90\n- Source: `archive\\runtime.toml:8` - `retention_days = 90` (file marked as \"# Retired prototype; do not use for current settings.\" at line 1)",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 12,
+          "invalidCalls": 0,
+          "requests": 8,
+          "requestBytes": [
+            2034,
+            3518,
+            5055,
+            6952,
+            8691,
+            10763,
+            12128,
+            13743
+          ],
+          "usage": {
+            "input": 9785,
+            "output": 1113
+          },
+          "elapsedMs": 14801
+        },
+        {
+          "id": "T07",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the configuration and code files:\n\n## Active Dispatcher Selection\nThe active scheduler selects **`src/dispatcher.py`**, as defined in `config/runtime.toml:8`.\n\n## Delivery Counts for Nonempty Events\n\n| Source | File/Line | Behavior for Nonempty Events |\n|--------|-----------|------------------------------|\n| **Active** (`src/dispatcher.py`) | Lines 10-12 | Returns `len(events)` — one delivery per event |\n| **Archived** (`archive/dispatcher.py`) | Lines 5-6 | Returns `1` — batches all events into a single delivery |\n\n## Difference\nFor **n nonempty events**:\n- Active dispatcher: **n deliveries** (one per event)\n- Archived dispatcher: **1 delivery** (batched together)\n- **Difference:** The active scheduler produces **n - 1 more deliveries** than the archived prototype.",
+          "correct": false,
+          "citations": 1,
+          "expectedCitations": 3,
+          "validCalls": 7,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            2077,
+            4315,
+            6954,
+            8945
+          ],
+          "usage": {
+            "input": 4011,
+            "output": 1004
+          },
+          "elapsedMs": 13376
+        },
+        {
+          "id": "T08",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on the route table in **src/routes.py**, the stations summary route (`/stations/summary`) requires:\n\n| Property | Value | Citation |\n|----------|-------|----------|\n| HTTP Method | `GET` | src/routes.py:5 |\n| Role | `analyst` | src/routes.py:5 |",
+          "correct": true,
+          "citations": 1,
+          "expectedCitations": 1,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            2002,
+            3130,
+            4319,
+            5836
+          ],
+          "usage": {
+            "input": 2693,
+            "output": 373
+          },
+          "elapsedMs": 5054
+        },
+        {
+          "id": "T09",
+          "exit": 1,
+          "reason": "error",
+          "answer": "",
+          "correct": false,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 8,
+          "invalidCalls": 0,
+          "requests": 9,
+          "requestBytes": [
+            2049,
+            3203,
+            4237,
+            5199,
+            6149,
+            7172,
+            8175,
+            9113
+          ],
+          "usage": {
+            "input": 6357,
+            "output": 515
+          },
+          "elapsedMs": 7032,
+          "error": "Maximum of 8 model requests reached"
+        },
+        {
+          "id": "T10",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "Based on **docs\\runbook.md**:\n\n| Question | Answer | Citation |\n|----------|--------|----------|\n| Which email receives on-call escalation? | `harbor-desk@tidewatch.example` | docs\\runbook.md:6 |\n| What command inspects the ST-01 snapshot? | `twctl snapshot show ST-01` | docs\\runbook.md:7 |",
+          "correct": true,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 6,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            2022,
+            3503,
+            5413,
+            7114
+          ],
+          "usage": {
+            "input": 3142,
+            "output": 510
+          },
+          "elapsedMs": 7003
+        },
+        {
+          "id": "T11",
+          "exit": 0,
+          "reason": "stop",
+          "answer": "**Export Status:** Not enabled (`config/runtime.toml:12`).\n\n**Route Specification (if enabled):**\n- **Method:** `POST` (`src/routes.py:6`)\n- **Role:** `operator` (`src/routes.py:6`)",
+          "correct": false,
+          "citations": 2,
+          "expectedCitations": 2,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            2035,
+            3278,
+            4522,
+            5875
+          ],
+          "usage": {
+            "input": 2851,
+            "output": 330
+          },
+          "elapsedMs": 4607
+        },
+        {
+          "id": "T12",
+          "exit": 1,
+          "reason": "length",
+          "answer": "",
+          "correct": false,
+          "citations": 0,
+          "expectedCitations": 0,
+          "validCalls": 3,
+          "invalidCalls": 0,
+          "requests": 4,
+          "requestBytes": [
+            2213,
+            3856,
+            5461,
+            6669
+          ],
+          "usage": {
+            "input": 3345,
+            "output": 1417
+          },
+          "elapsedMs": 18244
+        }
+      ],
+      "summary": {
+        "correct": 7,
+        "citationSpans": 16,
+        "expectedCitationSpans": 22,
+        "validCalls": 72,
+        "invalidCalls": 0,
+        "elapsedMs": 118762,
+        "requestBytes": 347519,
+        "providerInput": 56855,
+        "providerOutput": 8873
+      }
+    }
+  ]
+}

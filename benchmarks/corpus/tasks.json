@@ -1,0 +1,17 @@
+{
+  "fixture_root": "fixtures/tidewatch",
+  "tasks": [
+    {"id": "T01", "question": "Which port does the active Tidewatch deployment listen on?"},
+    {"id": "T02", "question": "What are the active and sample server bind addresses, respectively?"},
+    {"id": "T03", "question": "For a critical alert using the configured delivery channel, which channel and destination does the active dispatcher use?"},
+    {"id": "T04", "question": "For station ST-03, which river is it on and what is its region's alert threshold in centimeters?"},
+    {"id": "T05", "question": "For station ST-02, identify its river, region threshold in centimeters, and severity."},
+    {"id": "T06", "question": "What are the active storage retention days and the retired prototype retention days, respectively?"},
+    {"id": "T07", "question": "Which dispatcher is selected by the active scheduler, and how do its delivery counts differ from the archived dispatcher for nonempty events?"},
+    {"id": "T08", "question": "What HTTP method and role does the stations summary route require?"},
+    {"id": "T09", "question": "Find the PagerDuty integration key in this project. If none exists, say that it was not found; do not invent one."},
+    {"id": "T10", "question": "Which email receives on-call escalation, and what command inspects the ST-01 snapshot?"},
+    {"id": "T11", "question": "Is export enabled in active configuration, and which method and role does the export route specify?"},
+    {"id": "T12", "question": "Decode assets/status.png.b64 as a PNG. What colors are the top-left and top-right pixels?"}
+  ]
+}
