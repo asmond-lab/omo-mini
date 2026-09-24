@@ -27,6 +27,37 @@ export function checkProviderRequest(model: { readonly provider: string; readonl
   return proxy;
 }
 
+export const MAX_TURN_REQUESTS = 12;
+export const MAX_TOOL_ERRORS = 5;
+
+export function compactPrompt(options: { cwd: string; selectedTools?: string[]; toolSnippets?: Record<string, string>; promptGuidelines?: string[]; appendSystemPrompt?: string; contextFiles?: { path: string; content: string }[]; skills?: { name: string; description: string; filePath: string; disableModelInvocation: boolean }[] }, allowed: LocalIdentity): string {
+  const tools = options.selectedTools ?? [];
+  const snippets = tools.filter(name => options.toolSnippets?.[name]).map(name => `- ${name}: ${options.toolSnippets![name]}`).join("\n");
+  const instructions = options.contextFiles?.map(file => `<project_instructions path=${JSON.stringify(file.path)}>\n${file.content}\n</project_instructions>`).join("\n") ?? "";
+  const skills = options.skills?.filter(skill => !skill.disableModelInvocation).map(skill => `- ${skill.name}: ${skill.description} (${skill.filePath})`).join("\n") ?? "";
+  return [`You are OmO, a local coding assistant. Model: ${allowed.model}. Loaded context: ${allowed.context}. Workspace: ${allowed.root}. These are runtime facts, not repository facts.`,
+    "For greetings or questions solely about the loaded model or workspace, answer directly using the exact runtime model ID and canonical workspace path above; do not call tools or inspect environment variables. On Windows, a shell's /c/... path is only an alias, not the canonical C:\\... workspace path. Answer conversation-history questions from this conversation, not workspace searches. For code tasks use native tools as needed; verify changes. State uncertainty and failures honestly. If information is absent after a focused search, say it is not found rather than searching indefinitely. No cloud fallback.",
+    "Native tools (subject to host permissions):", tools.join(", "), snippets,
+    ...(options.promptGuidelines?.length ? ["Tool guidelines:", ...options.promptGuidelines] : []),
+    ...(options.appendSystemPrompt ? [options.appendSystemPrompt] : []),
+    ...(instructions ? ["Project instructions:", instructions] : []),
+    ...(skills ? ["Available skills (read the file when relevant):", skills] : []),
+    `Current working directory: ${options.cwd}`].join("\n\n");
+}
+
+export class TurnBudget {
+  requests = 0;
+  toolErrors = 0;
+  reset(): void { this.requests = 0; this.toolErrors = 0; }
+  toolResult(isError: boolean): void { if (isError) this.toolErrors++; else this.toolErrors = 0; }
+  admission(): string | undefined {
+    if (this.requests >= MAX_TURN_REQUESTS) return `Local turn stopped after ${MAX_TURN_REQUESTS} provider requests; answer not completed`;
+    if (this.toolErrors >= MAX_TOOL_ERRORS) return `Local turn stopped after ${MAX_TOOL_ERRORS} consecutive tool errors; answer not completed`;
+    this.requests++;
+    return undefined;
+  }
+}
+
 export function responseState(messages: readonly { readonly role: "assistant"; readonly stopReason?: string; readonly errorMessage?: string; readonly content?: readonly { readonly type: string; readonly text?: string }[] }[], aborted = false): string | undefined {
   if (aborted) return "Cancelled";
   const last = messages.filter(message => message.role === "assistant").at(-1);

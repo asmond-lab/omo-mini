@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { join } from "node:path";
-import { checkProviderRequest, identity, responseState } from "../src/policy.ts";
+import { checkProviderRequest, compactPrompt, identity, responseState, TurnBudget, MAX_TURN_REQUESTS, MAX_TOOL_ERRORS } from "../src/policy.ts";
 import { localEndpoint, modelsConfig, parseArgs, profileEnvironment, profilePaths } from "../src/profile.ts";
 
 const model = { id: "public-local-model", state: "loaded", type: "vlm", loaded_context_length: 69376, capabilities: ["tool_use"] };
@@ -28,6 +28,26 @@ test("selects loaded local context, images and exact model instead of advertised
   expect(parseArgs(["run", "--task", "code"])).toMatchObject({ permission: "workspace", command: "run" });
   expect(() => localEndpoint("https://example.com/v1")).toThrow("loopback");
   expect(() => localEndpoint("http://192.168.1.5:1234/v1")).toThrow("loopback");
+});
+
+test("compact prompt retains structured project instructions and native tool visibility", () => {
+  const prompt = compactPrompt({ cwd: "C:/workspace", selectedTools: ["read", "bash", "edit", "write"],
+    toolSnippets: { read: "read files", edit: "edit files" }, contextFiles: [{ path: "AGENTS.md", content: "PROJECT-RULE-417" }],
+    appendSystemPrompt: "LOCAL-APPEND-419" }, { model: model.id, context: 69376, baseUrl: "http://127.0.0.1:1234/v1", root: "C:/workspace" });
+  for (const text of ["PROJECT-RULE-417", "LOCAL-APPEND-419", "read", "bash", "edit", "write", model.id, "C:/workspace"]) expect(prompt).toContain(text);
+  expect(prompt).not.toContain("Pi documentation");
+});
+
+test("request bound includes retry attempts and resets only on next admitted user input", () => {
+  const budget = new TurnBudget();
+  for (let index = 0; index < MAX_TURN_REQUESTS; index++) expect(budget.admission()).toBeUndefined();
+  expect(budget.admission()).toContain("answer not completed");
+  budget.reset();
+  expect(budget.admission()).toBeUndefined();
+  for (let index = 0; index < MAX_TOOL_ERRORS; index++) budget.toolResult(true);
+  expect(budget.admission()).toContain("tool errors");
+  budget.toolResult(false);
+  expect(budget.admission()).toBeUndefined();
 });
 
 test("rejects mismatched effective provider and preserves explicit response failure states", () => {

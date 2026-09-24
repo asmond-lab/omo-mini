@@ -55,6 +55,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     await writeFile(join(global, "models.json"), JSON.stringify({ providers: { "fake-global-cloud": { apiKey: marker } } }));
     await writeFile(join(global, "settings.json"), marker);
     await writeFile(join(root, "public.txt"), `PUBLIC-NATIVE-PAIR-172\n${"P".repeat(1100)}\n`);
+    await writeFile(join(root, "AGENTS.md"), "PROJECT-RULE-ONLY-FROM-AGENTS-417\n");
     const before = await Promise.all([readFile(join(global, "models.json"), "utf8"), readFile(join(global, "settings.json"), "utf8")]);
     proc = spawn(process.execPath, ["src/cli.ts", "rpc", "--root", root, "--state-dir", state, "--base-url", `http://127.0.0.1:${server.port}/v1`], {
       cwd: resolve(import.meta.dir, ".."), stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PI_PROVIDER: "chatgpt-subscription", PI_MODEL: "gpt-6-sol", OPENAI_API_KEY: marker, OMO_CODING_AGENT_DIR: global, PI_CODING_AGENT_DIR: global, HOME: global, USERPROFILE: global },
@@ -99,9 +100,15 @@ test("native multi-pair history, live MCP inventory and disposable global profil
       globalSentinelsUnchanged: before.every((value, index) => value === after[index]), localProviderNames: Object.keys(localModels.providers), localSettingsContainsMarker: localSettings.includes(marker), stderrTail: errors.slice(-1200) };
     if (process.env["OMO_BOUNDARY_ARTIFACT_DIR"]) await writeFile(join(process.env["OMO_BOUNDARY_ARTIFACT_DIR"], "runtime.json"), JSON.stringify(receipt, null, 2));
     expect(requests.length).toBe(4);
+    expect(JSON.stringify(requests[0])).toContain("PROJECT-RULE-ONLY-FROM-AGENTS-417");
+    expect(JSON.stringify(requests[0])).toContain("read");
+    expect(JSON.stringify(requests[0])).toContain("edit");
+    expect(JSON.stringify(requests[0])).toContain("bash");
+    expect(JSON.stringify(requests[0])).toContain("write");
+    expect(Buffer.byteLength(JSON.stringify(requests[0]))).toBeLessThan(34394);
     // Drive several complete tool pairs into the loaded window, not just one
     // short pair with abundant headroom. Never accept an orphaned result.
-    expect(receipt.finalRequestBytes).toBeGreaterThan(24000);
+    expect(receipt.finalRequestBytes).toBeGreaterThan(20000);
     expect(receipt.finalRequestPairs.every(pair => pair.call && pair.result)).toBe(true);
     expect(receipt.globalSentinelsUnchanged).toBe(true);
     expect(receipt.localProviderNames).toEqual(["omo-mini-local"]);

@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 // Exercise the real omo-ai -> Senpi -> pi-ai -> HTTP path, not a mocked extension runner.
 test("local profile rejects bounded request before HTTP and permits a fitting request", async () => {
-  let context = 40000;
+  let context = 34000;
   let generations = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
     const path = new URL(request.url).pathname;
@@ -24,7 +24,7 @@ test("local profile rejects bounded request before HTTP and permits a fitting re
     return { code: result, output: await new Response(proc.stdout).text(), errors: await new Response(proc.stderr).text() };
   };
   try {
-    const rejected = await run("x".repeat(20000));
+    const rejected = await run("한".repeat(12000));
     expect(`${rejected.output}\n${rejected.errors} (exit ${rejected.code})`).toContain("no request sent");
     expect(generations).toBe(0);
     context = 200000;

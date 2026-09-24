@@ -1,10 +1,14 @@
 import type { ExtensionAPI } from "@code-yeongyu/senpi";
 import { MiniError } from "./local.ts";
-import { checkProviderRequest, identity, responseState } from "./policy.ts";
+import { checkProviderRequest, compactPrompt, identity, responseState, TurnBudget } from "./policy.ts";
 
 // Loaded after the actual OmO plugin. Native tools, resources, TUI, and sessions remain upstream-owned.
 export default function localProfile(pi: ExtensionAPI): void {
   const allowed = identity(process.env);
+  const budget = new TurnBudget();
+  let pendingUserInputs = 0;
+  pi.on("input", event => { if (event.source !== "extension") pendingUserInputs++; });
+  pi.on("tool_execution_end", event => budget.toolResult(event.isError));
   const status = (ctx: { ui: { setStatus(key: string, text: string | undefined): void } }) =>
     ctx.ui.setStatus("omo-mini", `LOCAL ${allowed.model} | ${allowed.context} ctx | ${allowed.root}`);
   pi.on("session_start", (_event, ctx) => status(ctx));
@@ -18,9 +22,10 @@ export default function localProfile(pi: ExtensionAPI): void {
       ctx.ui.setWidget("omo-mini-profile", lines);
     },
   });
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nLocal omo-mini profile: You are running as ${allowed.model} at ${allowed.baseUrl} with loaded context ${allowed.context}; workspace ${allowed.root}. These are runtime facts, not repository facts. For greetings, model identity and questions about this conversation's history, answer directly from these runtime facts and the conversation; do not search environment variables, keys or files unless the user asks for a code or workspace investigation. For coding tasks, use native tools as needed, keep calls focused, verify edits with tests, and report uncertainty and errors explicitly. No cloud fallback.`,
-  }));
+  pi.on("before_agent_start", event => {
+    if (pendingUserInputs > 0) { pendingUserInputs--; budget.reset(); }
+    return { systemPrompt: compactPrompt(event.systemPromptOptions, allowed) };
+  });
   pi.on("tool_result", (event) => ({
     content: event.content.map(part => part.type === "text" && part.text.length > 6000
       ? { ...part, text: `${part.text.slice(0, 6000)}\n[Tool output truncated by local profile]` } : part),
@@ -28,6 +33,8 @@ export default function localProfile(pi: ExtensionAPI): void {
   pi.on("before_provider_request", (event) => {
     try {
       checkProviderRequest(event.model, event.payload, allowed);
+      const limit = budget.admission();
+      if (limit) return { action: "reject", reason: limit };
     } catch (error) {
       if (error instanceof MiniError) return { action: "reject", reason: error.message };
       throw error;
