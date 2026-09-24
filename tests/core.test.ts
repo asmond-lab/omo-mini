@@ -84,6 +84,10 @@ test("CLI rejects missing task, bad URL and unknown argument", () => {
 
 test("paste markers split across chunks and embedded controls are assembled once", () => {
   const assembler = new InputAssembler();
+  const esc = String.fromCharCode(27);
+  expect(assembler.echo(esc + "[20")).toBe("");
+  expect(assembler.echo("0~first" + String.fromCharCode(10) + "猫" + String.fromCharCode(10) + "third" + esc + "[20")).toBe("first" + String.fromCharCode(10) + "猫" + String.fromCharCode(10) + "third");
+  expect(assembler.echo("1~" + String.fromCharCode(13))).toBe(String.fromCharCode(10));
   expect(assembler.feed("\x1b[20")).toEqual([]);
   expect(assembler.feed("0~first\n猫\nthird\x1b[20")).toEqual([]);
   expect(assembler.feed("1~")).toEqual([]);

@@ -119,3 +119,45 @@ test("deadline aborts an open provider stream without claiming success", async (
     expect(result.reason).not.toBe("stop");
   } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
 });
+
+test("repeated unproductive search turns trigger one natural, tool-free final answer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omo-mini-no-progress-"));
+  await writeFile(join(root, "ordinary.txt"), "ordinary evidence only\n");
+  const choices: string[] = [];
+  const server = Bun.serve({ port: 0, async fetch(request) {
+    const body = await request.json() as { tool_choice?: string; messages: unknown[] };
+    choices.push(body.tool_choice ?? "auto");
+    if (body.tool_choice === "none") {
+      expect(JSON.stringify(body.messages)).toContain("complete for eligible files");
+      return new Response(`${chunk({ content: "The term was not found in scanned eligible files." })}${chunk({}, "stop")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+    }
+    const id = `miss${choices.length}`;
+    return new Response(`${chunk({ tool_calls: [{ index: 0, id, type: "function", function: { name: "search_files", arguments: '{"text":"aurora_hinge_token"}' } }] })}${chunk({}, "tool_calls")}data: [DONE]\n\n`,
+      { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const result = await runTask({ root, task: "Find aurora_hinge_token; say if not found", selected, baseUrl: `http://localhost:${server.port}/v1` });
+    expect(result.reason).toBe("stop");
+    expect(result.answer).toContain("not found in scanned eligible files");
+    expect(result.tools).toHaveLength(4);
+    expect(choices).toEqual(["auto", "auto", "auto", "auto", "none"]);
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
+});
+
+test("incomplete capped search never promotes no match to exhaustive absence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omo-mini-partial-"));
+  await Promise.all(Array.from({ length: 301 }, (_, i) => writeFile(join(root, `file-${String(i).padStart(3, "0")}.txt`), "known\n")));
+  let calls = 0;
+  const server = Bun.serve({ port: 0, async fetch(request) {
+    const body = await request.json() as { tool_choice?: string };
+    if (body.tool_choice === "none") return new Response(`${chunk({ content: "It does not exist anywhere in this project." })}${chunk({}, "stop")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+    return new Response(`${chunk({ tool_calls: [{ index: 0, id: `missing${++calls}`, type: "function", function: { name: "search_files", arguments: '{"text":"aurora_hinge_token"}' } }] })}${chunk({}, "tool_calls")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  } });
+  try {
+    const result = await runTask({ root, task: "Find aurora_hinge_token", selected, baseUrl: `http://localhost:${server.port}/v1` });
+    expect(result.tools[0]?.result).toContain("coverage: incomplete");
+    expect(result.reason).toBe("stop");
+    expect(result.answer).toContain("coverage: incomplete");
+    expect(result.answer).not.toContain("anywhere in this project");
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }); }
+});

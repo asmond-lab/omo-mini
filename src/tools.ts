@@ -48,6 +48,7 @@ export async function searchScoped(root: string, pattern: string): Promise<strin
   const queue = [root];
   const hits: string[] = [];
   let examined = 0;
+  let oversized = 0;
   while (queue.length && examined < 300 && hits.length < 30) {
     const dir = queue.shift();
     if (!dir) break;
@@ -58,7 +59,7 @@ export async function searchScoped(root: string, pattern: string): Promise<strin
       if (!entry.isFile()) continue;
       examined++;
       const file = await confined(root, path);
-      if ((await stat(file)).size > MAX_FILE) continue;
+      if ((await stat(file)).size > MAX_FILE) { oversized++; continue; }
       const lines = (await readFile(file, "utf8")).split("\n");
       for (let i = 0; i < lines.length && hits.length < 30; i++) {
         const line = lines[i];
@@ -67,7 +68,8 @@ export async function searchScoped(root: string, pattern: string): Promise<strin
       if (examined >= 300 || hits.length >= 30) break;
     }
   }
-  return hits.length ? hits.join("\n").slice(0, MAX_RESULT) : "No matches in scanned files";
+  return hits.length ? hits.join("\n").slice(0, MAX_RESULT) :
+    `No matches in scanned files (coverage: ${examined >= 300 ? "incomplete; 300-file scan cap reached" : "complete for eligible files"}; ${examined} files inspected; ${oversized} oversized files and excluded directories/symlinks not searched). Search is literal; for multiword concepts try shorter terms.`;
 }
 
 export function scopedTools(root: string): AgentTool[] {

@@ -100,9 +100,8 @@ async function interactive(flags: Flags): Promise<void> {
         controller.abort();
         if (raw === "\x03") continue;
       }
-      stdout.write(raw.replace(/\x1b\[200~|\x1b\[201~/g, "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x03/g, "").replace(/\x7f/g, "\b \b").replace(/\r\n|\r/g, "\n").replace(/[\x00-\x08\x0b-\x1f]/g, ""));
+      stdout.write(input.echo(raw));
       for (const line of input.feed(raw)) {
-        stdout.write("\n");
         if (line === "/quit") {
           if (controller) { controller.abort(); continue; }
           quitting = true; return;
