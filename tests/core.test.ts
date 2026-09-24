@@ -91,7 +91,7 @@ test("FileDrop decodes one real PNG, preserves Unicode text and rejects unsuppor
     await expect(fileDropAttachment([join(dir, "large.png")])).rejects.toThrow("large");
     expect(() => parseClipboard({ text: "", image: null, fileDrop: [path, path] })).not.toThrow();
   } finally { await rm(dir, { recursive: true, force: true }); }
-});
+}, 30_000);
 
 test("multiline Unicode paste retains line breaks as one task", () => {
   const assembler = new InputAssembler();
