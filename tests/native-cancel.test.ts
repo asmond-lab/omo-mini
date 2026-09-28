@@ -52,11 +52,13 @@ test("native RPC abort stops an open local provider stream and reports cancellat
     expect((await ended).aborted).toBe(true);
   } finally {
     try {
+      // Native reaches process.exit within ~160ms of EOF, but on a Windows runner the first Native process of a fresh profile
+      // took 8.1-17.1s more to terminate (CI run 36453082769); 45s bounds that OS exit, not the product shutdown.
       proc.stdin.end();
       if (proc.exitCode === null && proc.signalCode === null) await new Promise<void>((accept, reject) => {
         let settled = false;
         const onExit = () => { if (settled) return; settled = true; clearTimeout(timer); proc.off("exit", onExit); accept(); };
-        const timer = setTimeout(() => { if (settled) return; settled = true; proc.off("exit", onExit); proc.kill(); reject(new Error(`Native abort cleanup timed out (pid ${proc.pid}): ${errors.slice(-500)}`)); }, 10000);
+        const timer = setTimeout(() => { if (settled) return; settled = true; proc.off("exit", onExit); proc.kill(); reject(new Error(`Native abort cleanup timed out (pid ${proc.pid}): ${errors.slice(-500)}`)); }, 45000);
         proc.once("exit", onExit);
         if (proc.exitCode !== null || proc.signalCode !== null) onExit();
       });

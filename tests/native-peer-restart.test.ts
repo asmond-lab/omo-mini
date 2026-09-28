@@ -109,8 +109,10 @@ test("Native Mini peer hosts retain independent guards, resume after caller rest
     };
     const stop = async () => {
       if (proc.exitCode !== null || proc.signalCode !== null) return;
+      // Native reaches process.exit within ~160ms of EOF, but on a Windows runner the first Native process of a fresh profile
+      // took 8.1-17.1s more to terminate (CI run 36453082769); 45s bounds that OS exit, not the product shutdown.
       const exit = new Promise<void>((accept, reject) => {
-        const timer = setTimeout(() => { proc.kill(); reject(Error("Owned Native caller did not exit on EOF")); }, 15000);
+        const timer = setTimeout(() => { proc.kill(); reject(Error("Owned Native caller did not exit on EOF")); }, 45000);
         proc.once("exit", () => { clearTimeout(timer); accept(); });
       });
       proc.stdin.end(); await exit;
@@ -263,4 +265,4 @@ test("Native Mini peer hosts retain independent guards, resume after caller rest
       if (passed && !cleaned) throw Error("Owned Native peer host cleanup was refused");
     }
   }
-}, 180000);
+}, 240000);
