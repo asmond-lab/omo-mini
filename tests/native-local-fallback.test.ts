@@ -257,4 +257,4 @@ test("opt-in never infers at unloaded startup until real Native /model admission
   } catch (error) { testError = error; throw error; } finally {
     await closeOwnedRpc(child, close.promise, server, root, testError);
   }
-});
+}, 60000); // Native startup alone can exceed Bun's 5s default on CI runners; each RPC has its own 45s deadline.

@@ -6,15 +6,25 @@ import { join } from "node:path";
 
 type Frame = { readonly type: string; readonly id?: string; readonly command?: string; readonly success?: boolean;
   readonly data?: { readonly sessionFile?: string; readonly cancelled?: boolean }; readonly messages?: unknown };
+type Chat = { readonly messages?: readonly { readonly role?: string; readonly content?: unknown }[] };
+
+const text = (content: unknown): string => typeof content === "string" ? content : Array.isArray(content)
+  ? content.map(part => part !== null && typeof part === "object" && "text" in part && typeof part.text === "string" ? part.text : "").join("") : "";
 
 // The real omo-mini entry launches the real OmO/Senpi RPC runtime. The local model HTTP wire is the only fake.
 test("native multi-turn sessions retain context, /new isolates it and /resume restores it", async () => {
-  const requests: unknown[] = [];
+  const requests: Chat[] = [];
+  // Native memory workers (facts extraction, the recall advisor) share this local endpoint and
+  // can send a request right after a turn, so pick each turn's request by its own user message.
+  const turnRequest = (message: string): Chat | undefined => requests.findLast(request => {
+    const last = request.messages?.at(-1);
+    return last?.role === "user" && text(last.content) === message;
+  });
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: async request => {
     const pathname = new URL(request.url).pathname;
     if (pathname === "/api/v0/models") return Response.json({ data: [{ id: "fixture-local", state: "loaded", type: "llm", loaded_context_length: 200000, capabilities: ["tool_use"] }] });
     if (pathname === "/v1/chat/completions") {
-      requests.push(await request.json());
+      requests.push(await request.json() as Chat);
       return new Response('data: {"id":"one","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ACK"},"finish_reason":null}]}\n\ndata: {"id":"one","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
     }
     return new Response("Not Found", { status: 404 });
@@ -77,15 +87,21 @@ test("native multi-turn sessions retain context, /new isolates it and /resume re
     expect(saved).toBeTruthy();
     await prompt("Remember this public sentinel: CERULEAN-PAW-781.");
     await prompt("What was the public sentinel?");
-    expect(JSON.stringify(requests.at(-1))).toContain("CERULEAN-PAW-781");
+    const recalled = turnRequest("What was the public sentinel?");
+    expect(recalled).toBeDefined();
+    expect(JSON.stringify(recalled)).toContain("CERULEAN-PAW-781");
     const fresh = await send("new_session");
     expect(fresh.data?.cancelled).toBe(false);
     await prompt("Answer OK. Do not refer to any previous conversation.");
-    expect(JSON.stringify(requests.at(-1))).not.toContain("CERULEAN-PAW-781");
+    const isolated = turnRequest("Answer OK. Do not refer to any previous conversation.");
+    expect(isolated).toBeDefined();
+    expect(JSON.stringify(isolated)).not.toContain("CERULEAN-PAW-781");
     const restored = await send("switch_session", { sessionPath: saved });
     expect(restored.data?.cancelled).toBe(false);
     await prompt("Repeat the sentinel from the earlier session.");
-    expect(JSON.stringify(requests.at(-1))).toContain("CERULEAN-PAW-781");
+    const resumed = turnRequest("Repeat the sentinel from the earlier session.");
+    expect(resumed).toBeDefined();
+    expect(JSON.stringify(resumed)).toContain("CERULEAN-PAW-781");
     expect(frames.some(frame => frame.type === "agent_idle")).toBe(true);
   } finally {
     proc.stdin.end();

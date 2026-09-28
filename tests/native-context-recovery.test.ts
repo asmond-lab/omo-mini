@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { stopOwnedWindowsTree } from "./native-context-recovery-owned-windows.ts";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -111,7 +111,8 @@ test(`native overflow ${keepRecentTokens ? "retains a sized tool pair" : "projec
       const text = typeof content === "string" ? content : Array.isArray(content)
         ? content.find(part => part.type === "text" && part.text.includes("<session_work_checkpoint>"))?.text ?? "" : "";
       const checkpoint = JSON.parse(text.match(/<session_work_checkpoint>\n(.+?)\n/s)?.[1] ?? "{}");
-      expect(checkpoint.root).toBe(resolve(root));
+      // The launcher canonicalizes --root; a runner temp dir can be an 8.3 short path.
+      expect(checkpoint.root).toBe(await realpath(root));
       expect(checkpoint.observed).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: callId, tool: "read", result: expect.stringContaining(marker) }),
       ]));
