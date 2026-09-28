@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtemp, mkdir, writeFile, symlink, rm, copyFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chooseModel, checkBudget, MiniError } from "../src/local.ts";
+import { chooseModel, checkBudget, MiniError, outputLimit, sdkModel } from "../src/local.ts";
 import { confined, readScoped, searchScoped, workspace } from "../src/tools.ts";
 import { pngAttachment, parseClipboard, fileDropAttachment } from "../src/clipboard.ts";
 import { InputAssembler } from "../src/input.ts";
@@ -20,6 +20,16 @@ test("selects only loaded tool-capable model and rejects ambiguous overrides", (
 test("bounds complete request including tool schema before streaming", () => {
   expect(checkBudget([{ role: "system", toolsAdded: [{ description: "a" }] }], 6000)).toBeGreaterThan(0);
   expect(() => checkBudget([{ role: "system", toolsAdded: [{ description: "x".repeat(6000) }] }], 6000)).toThrow("no request sent");
+});
+
+test("allocates output from the loaded context and reserves it in the legacy budget", () => {
+  for (const [context, expected] of [[1, 1], [2048, 1], [3072, 1], [8192, 2048], [32768, 8192], [69376, 8192]] as const) {
+    expect(outputLimit(context)).toBe(expected);
+    expect(sdkModel({ ...model, loaded_context_length: context }, "http://localhost:1234/v1").maxTokens).toBe(expected);
+  }
+  const payload = { text: "x".repeat(22_100) };
+  expect(() => checkBudget(payload, 32768)).toThrow("no request sent");
+  expect(checkBudget(payload, 32768, 512)).toBeGreaterThan(0);
 });
 
 test("realpath confines reads and search and rejects symlink escape", async () => {

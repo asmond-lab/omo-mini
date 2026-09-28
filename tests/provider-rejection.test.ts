@@ -3,16 +3,22 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { profileEnvironment, profilePaths, upstreamEntry } from "../src/profile.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 // Exercise the real omo-ai -> Senpi -> pi-ai -> HTTP path, not a mocked extension runner.
-test("local profile rejects bounded request before HTTP and permits a fitting request", async () => {
-  let context = 34000;
-  let generations = 0;
-  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+test("local profile sends a large valid request despite its serialized-byte proxy", async () => {
+  let context = 65536;
+  let foregroundGenerations = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === "/api/v0/models") return Response.json({ data: [{ id: "test-local", state: "loaded", type: "vlm", capabilities: ["tool_use"], loaded_context_length: context }] });
+    if (path === "/api/v1/models") return Response.json({ models: [{ key: "test-local", type: "llm",
+      capabilities: { trained_for_tool_use: true, vision: true }, loaded_instances: [{ id: "test-local", config: { context_length: context } }] }] });
     if (path === "/v1/chat/completions") {
-      generations++;
+      const body = z.object({ model: z.literal("test-local"), messages: z.array(z.object({ role: z.string(), content: z.unknown() })) }).parse(await request.json());
+      const latestUser = body.messages.findLast(message => message.role === "user")?.content;
+      const text = typeof latestUser === "string" ? latestUser : Array.isArray(latestUser)
+        ? latestUser.flatMap(part => typeof part === "object" && part !== null && "type" in part && part.type === "text" && "text" in part && typeof part.text === "string" ? [part.text] : []).join("") : "";
+      if (text === "한".repeat(30000) || text === "Say OK") foregroundGenerations++;
       return new Response('data: {"id":"one","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":null}]}\n\ndata: {"id":"one","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
     }
     return new Response("Not Found", { status: 404 });
@@ -24,14 +30,15 @@ test("local profile rejects bounded request before HTTP and permits a fitting re
     return { code: result, output: await new Response(proc.stdout).text(), errors: await new Response(proc.stderr).text() };
   };
   try {
-    const rejected = await run("한".repeat(12000));
-    expect(`${rejected.output}\n${rejected.errors} (exit ${rejected.code})`).toContain("no request sent");
-    expect(generations).toBe(0);
+    const large = await run("한".repeat(30000));
+    expect(large.code, `${large.output.slice(-600)}\n${large.errors.slice(-600)}`).toBe(0);
+    expect(large.output).toContain("OK");
+    expect(foregroundGenerations).toBe(1);
     context = 200000;
     const allowed = await run("Say OK");
     expect(allowed.code).toBe(0);
     expect(allowed.output).toContain("OK");
-    expect(generations).toBe(1);
+    expect(foregroundGenerations).toBe(2);
   } finally { server.stop(true); await rm(dir, { recursive: true, force: true }); }
 }, 110000);
 

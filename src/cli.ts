@@ -2,19 +2,25 @@
 import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { stdout, stderr } from "node:process";
 import { text } from "node:stream/consumers";
-import { discover, MiniError } from "./local.ts";
+import { discover, MINI_IDENTITY, MiniError } from "./local.ts";
 import { parseArgs, prepareProfile, upstreamEntry } from "./profile.ts";
 
-const HELP = `omo-mini 0.2.2 - independent local profile of OmO Native
+export const nativeTelemetryFlags = (enabled: boolean): string[] => enabled ? [] : ["--omo-senpi-telemetry-disabled"];
+
+const HELP = `${MINI_IDENTITY} - independent local profile of OmO Native
 Usage: omo-mini [--root PATH] [--state-dir PATH] [--model ID] [--base-url URL] [--permission workspace|ask|read-only]
+       [--native-telemetry] (explicit OmO Native telemetry opt-in; off by default)
+       [--native-memory-sync] (Mini-only memory mirror auto-push opt-in; off by default)
+       [--native-local-fallback ID ...] (ordered eligible local fallback models; off by default)
        omo-mini run --root PATH --task TEXT [--image PATH] [--session NAME] [--json] [profile options]
        omo-mini doctor [--json] [profile options]
        omo-mini rpc [profile options] (native OmO JSONL protocol over stdin/stdout)
 OmO's native TUI supplies /new, /resume, Alt+V image/text paste on Windows and project instructions.
-Local-only; no inherited cloud auth, remote MCPs, or OmO global state. Profile defaults to ~/.omo-mini.
+Local model inference only: no inherited cloud-model credentials; fallback requires explicit local model IDs. OmO state is isolated under ~/.omo-mini by default.
+Native external tools and services remain available with their required permissions and credentials.
 `;
 
 async function imageArgument(root: string, image: string): Promise<string> {
@@ -38,13 +44,16 @@ export async function main(argv: readonly string[]): Promise<void> {
     }
     const profile = await prepareProfile({ ...options, root });
     const extension = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./extension.ts" : "./extension.js", import.meta.url));
-    const args = [upstreamEntry(), "--offline", "--no-approve", "--no-model-fallback", "--no-recommended-models",
-      "--no-extensions", "--no-prompt-templates", "--no-skills", "--omo-senpi-builtin-mcps-disabled",
-      "--tools", "read,grep,find,ls,bash,powershell,edit,write,memory,create_goal,update_goal,get_goal,todo",
-      "--omo-senpi-task-disabled", "--omo-senpi-thread-disabled", "--omo-senpi-onboarding-disabled",
-      "--omo-senpi-lsp-disabled", "--omo-senpi-telemetry-disabled",
+    // Native thread tools under Mini use isolated, ownership-verified peer hosts, never the global host.
+    profile.env["OMO_MINI_PEER_STATE"] = profile.paths.state;
+    profile.env["OMO_MINI_PEER_SESSION_DIR"] = profile.paths.sessions;
+    profile.env["OMO_MINI_PEER_PERMISSION"] = options.permission;
+    profile.env["OMO_MINI_PEER_EXTENSION"] = extension;
+    profile.env["OMO_MINI_PEER_BRIDGE"] = pathToFileURL(fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./peer-thread.ts" : "./peer-thread.js", import.meta.url))).href;
+    const args = [upstreamEntry(), "--offline", ...(options.nativeLocalFallback.length ? [] : ["--no-model-fallback"]), "--no-recommended-models",
+      ...nativeTelemetryFlags(options.nativeTelemetry), "--omo-senpi-onboarding-disabled", "--omo-senpi-native-badge-disabled",
       "--extension", extension, "--session-dir", profile.paths.sessions,
-      "--provider", "omo-mini-local", "--model", profile.model.id, "--models", `omo-mini-local/${profile.model.id}`,
+      "--provider", "omo-mini-local", "--model", profile.model.id,
       "--permission-preset", options.permission,
       "--permission", `${options.permission === "workspace" ? "memory=allow," : ""}create_goal=allow,update_goal=allow,get_goal=allow,todo=allow,bash:rm *=deny`];
     if (options.command === "rpc") args.push("--mode", "rpc");
@@ -59,10 +68,14 @@ export async function main(argv: readonly string[]): Promise<void> {
       const child = spawn(process.execPath, args, { cwd: root, env: profile.env, stdio: ["inherit", "pipe", "pipe"], windowsHide: true });
       const [code, output, errors] = await Promise.all([
         new Promise<number>((done, reject) => { child.once("error", reject); child.once("exit", (exit, signal) => done(signal ? 1 : exit ?? 1)); }),
-        text(child.stdout), text(child.stderr),
+        text((async function* () {
+          for await (const chunk of child.stdout) {
+            stdout.write(chunk);
+            yield chunk;
+          }
+        })()), text(child.stderr),
       ]);
       if (errors) stderr.write(errors);
-      if (output) stdout.write(output);
       const events: unknown[] = output.split(/\r?\n/).filter(Boolean).flatMap(line => {
         try { return [JSON.parse(line) as unknown]; } catch { return []; }
       });

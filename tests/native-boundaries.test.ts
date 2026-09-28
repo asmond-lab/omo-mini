@@ -9,12 +9,15 @@ type Message = { role?: string; tool_calls?: { id: string }[]; tool_call_id?: st
 
 // Real launcher, OmO/Senpi RPC and pi-ai transport; only the model HTTP wire is fake.
 test("native multi-pair history, live MCP inventory and disposable global profile isolation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "omo-mini-boundaries-"));
-  const global = join(root, "fake-global");
-  const state = join(root, "state");
+  const base = await mkdtemp(join(tmpdir(), "omo-mini-boundaries-"));
+  const global = join(base, "fake-global");
+  // The workspace lives inside the fake HOME so the child's project-config walk stops
+  // there and never reaches the real user's ~/.omo above the temp directory.
+  const root = join(global, "ws");
+  const state = join(base, "state");
   const marker = "PUBLIC-FAKE-GLOBAL-DO-NOT-ADOPT";
   const ids = ["boundary-pair-1", "boundary-pair-2", "boundary-pair-3"];
-  const requests: { messages: Message[]; tools?: { function?: { name?: string }; name?: string }[] }[] = [];
+  const requests: { model: string; messages: Message[]; tools?: { function?: { name?: string; parameters?: { required?: string[] } }; name?: string }[] }[] = [];
   const frames: Frame[] = [];
   const listeners = new Set<(frame: Frame) => void>();
   let proc: ReturnType<typeof spawn> | undefined;
@@ -23,7 +26,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
   let nextId = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === "/api/v0/models") return Response.json({ data: [{ id: "boundary-local", state: "loaded", type: "llm", loaded_context_length: 34000, capabilities: ["tool_use"] }] });
+    if (path === "/api/v0/models") return Response.json({ data: [{ id: "boundary-local", state: "loaded", type: "llm", loaded_context_length: 65536, capabilities: ["tool_use"] }] });
     if (path !== "/v1/chat/completions") return new Response("Not Found", { status: 404 });
     requests.push(await request.json() as (typeof requests)[number]);
     const pair = ids[requests.length - 1];
@@ -51,7 +54,7 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     await ended;
   }
   try {
-    await mkdir(global, { recursive: true });
+    await mkdir(root, { recursive: true });
     await writeFile(join(global, "models.json"), JSON.stringify({ providers: { "fake-global-cloud": { apiKey: marker } } }));
     await writeFile(join(global, "settings.json"), marker);
     await writeFile(join(root, "public.txt"), `PUBLIC-NATIVE-PAIR-172\n${"P".repeat(1100)}\n`);
@@ -79,6 +82,9 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     const mcpServers = surfaces.data?.["mcpServers"] as { name: string }[];
     const extensions = surfaces.data?.["extensions"] as { path: string }[];
     expect(extensions.map(extension => extension.path).some(path => path.includes(global))).toBe(false);
+    const stateBefore = (await send("get_state")).data;
+    expect(stateBefore?.["model"]).toMatchObject({ provider: "omo-mini-local", id: "boundary-local", contextWindow: 65536 });
+    expect(stateBefore?.["contextUsage"]).toMatchObject({ contextWindow: 65536 });
     await prompt("Read public.txt three times using the read tool and report the public value.");
     expect(requests.length, `RPC frames: ${JSON.stringify(frames.slice(-8))}; stderr: ${errors.slice(-1200)}`).toBe(4);
     for (let index = 0; index < 3; index++) {
@@ -91,8 +97,10 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     const after = await Promise.all([readFile(join(global, "models.json"), "utf8"), readFile(join(global, "settings.json"), "utf8")]);
     const localModels = JSON.parse(await readFile(join(state, "agent", "models.json"), "utf8"));
     const localSettings = await readFile(join(state, "agent", "settings.json"), "utf8");
-    const receipt = { invocation: "bun test tests/native-boundaries.test.ts (native src/cli.ts rpc, disposable root/state, 127.0.0.1 ephemeral SSE)", context: 34000,
-      toolPairIds: ids, generationRequests: requests.length, finalRequestBytes: Buffer.byteLength(JSON.stringify(requests.at(-1))),
+    const receipt = { invocation: "bun test tests/native-boundaries.test.ts (native src/cli.ts rpc, disposable root/state, 127.0.0.1 ephemeral SSE)", context: 65536,
+      toolPairIds: ids, generationRequests: requests.length, firstRequestBytes: Buffer.byteLength(JSON.stringify(requests[0])),
+      firstSystemBytes: Buffer.byteLength(String(requests[0]?.messages[0]?.content)), finalRequestBytes: Buffer.byteLength(JSON.stringify(requests.at(-1))),
+      contextUsage: stateBefore?.["contextUsage"],
       pairsOnNextWire: ids.map((id, index) => ({ id, call: requests[index + 1]?.messages.some(m => m.role === "assistant" && m.tool_calls?.some(c => c.id === id)), result: requests[index + 1]?.messages.some(m => m.role === "tool" && m.tool_call_id === id) })),
       finalRequestPairs: ids.map(id => ({ id, call: requests.at(-1)?.messages.some(m => m.role === "assistant" && m.tool_calls?.some(c => c.id === id)), result: requests.at(-1)?.messages.some(m => m.role === "tool" && m.tool_call_id === id) })),
       terminalAssistant: { stopReason: terminalAssistant?.stopReason, errorMessage: terminalAssistant?.errorMessage },
@@ -105,17 +113,23 @@ test("native multi-pair history, live MCP inventory and disposable global profil
     expect(JSON.stringify(requests[0])).toContain("edit");
     expect(JSON.stringify(requests[0])).toContain("bash");
     expect(JSON.stringify(requests[0])).toContain("write");
-    expect(Buffer.byteLength(JSON.stringify(requests[0]))).toBeLessThan(34394);
-    // Drive several complete tool pairs into the loaded window, not just one
-    // short pair with abundant headroom. Never accept an orphaned result.
-    expect(receipt.finalRequestBytes).toBeGreaterThan(20000);
+    const callable = new Set(requests[0]?.tools?.map(tool => tool.function?.name ?? tool.name));
+    for (const name of ["read", "edit", "write", "memory", "eval", "task", "lsp_diagnostics"])
+      expect(callable.has(name)).toBe(true);
+    for (const name of ["ls", "find"]) expect(callable.has(name)).toBe(true);
+    for (const name of ["bash", "powershell", "grep", "bash_output", "bash_input", "bash_resize", "kill_bash"])
+      expect(callable.has(name)).toBe(false); // Eval-only shell, grep and bash session tools stay withheld from direct model calls.
+    expect(requests[0]?.tools?.find(tool => tool.function?.name === "eval")?.function?.parameters?.required).toContain("language");
+    expect(terminalAssistant?.stopReason).toBe("stop"); // Native admitted the full resource set at the effective loaded context.
+    // Drive several complete tool pairs into the loaded window. Never accept an orphaned result.
     expect(receipt.finalRequestPairs.every(pair => pair.call && pair.result)).toBe(true);
     expect(receipt.globalSentinelsUnchanged).toBe(true);
     expect(receipt.localProviderNames).toEqual(["omo-mini-local"]);
+    expect(requests.every(request => request.model === "boundary-local")).toBe(true); // Every inference used the local instance.
     expect(receipt.localSettingsContainsMarker).toBe(false);
     expect(JSON.stringify(requests)).not.toContain(marker);
-    expect(mcpServers.map(server => server.name)).not.toContain("context7");
-    expect(mcpServers.map(server => server.name)).not.toContain("grep_app");
+    for (const name of ["_ast_grep", "context7", "grep_app"])
+      expect(mcpServers.map(server => server.name)).toContain(name); // Full Native MCP inventory, independent of inference provider.
   } finally {
     if (proc && proc.exitCode === null) {
       const exit = new Promise<void>((accept, reject) => {
@@ -127,6 +141,6 @@ test("native multi-pair history, live MCP inventory and disposable global profil
       await exit;
     }
     server.stop(true);
-    await rm(root, { recursive: true, force: true });
+    await rm(base, { recursive: true, force: true });
   }
 }, 160000);

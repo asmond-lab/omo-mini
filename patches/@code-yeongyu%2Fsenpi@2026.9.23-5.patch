@@ -1,7 +1,280 @@
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -430,7 +430,15 @@
+         this._fallbackNow = config.fallbackNow ?? (() => Date.now());
+         this._retryRandom = config.retryRandom ?? Math.random;
+         this._retryFallback = new RetryFallbackController({
+-            getSettings: () => this.settingsManager.getRetryFallbackSettings(),
++            getSettings: () => {
++                const settings = this.settingsManager.getRetryFallbackSettings();
++                if (process.env.OMO_MINI_LOCAL_PROFILE !== "1") return settings;
++                const local = process.env.OMO_MINI_LOCAL_FALLBACK;
++                if (!local) return { ...settings, modelFallback: false, chains: {} };
++                const { primary, entries } = JSON.parse(local);
++                // Ignore global, project and builtin cloud chains: this session has exactly one approved local ladder.
++                return { ...settings, modelFallback: true, chains: { [primary]: entries } };
++            },
+             registry: this._modelRegistry,
+             cooldowns: this._selectorCooldowns,
+             logger: fallbackLogger,
+@@ -2689,6 +2697,10 @@
+         catch (error) {
+             options?.preflightResult?.(false);
+             throw error;
++        }
++        if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && process.env.OMO_MINI_LOADED === "0") {
++            options?.preflightResult?.(false);
++            throw new Error("No local model loaded. Select a downloaded model with /model before inference.");
+         }
+         if (options?.source !== "extension" && this._compactionAbortController !== undefined) {
+             options?.preflightResult?.(false);
+@@ -3653,6 +3665,7 @@
+      * Abort current operation and wait for agent to become idle.
+      */
+     async abort() {
++        this._miniModelLoadAbortController?.abort();
+         // Streaming aborts are carried by agent_end provenance; only gaps need session_abort.
+         const wasMidRun = this.isStreaming && this._retryAbortController === undefined;
+         const hadRetryBackoff = this._retryAbortController !== undefined;
+@@ -3981,6 +3994,24 @@
+         }
+     }
+     async _setModel(model, updateGlobalDefaults) {
++        if (process.env.OMO_MINI_LOCAL_PROFILE === "1") {
++            if (this._miniModelTransition) throw new Error("Local model transition already in progress");
++            this._miniModelTransition = true;
++        }
++        try {
++        if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && model.provider === "omo-mini-local" &&
++            (process.env.OMO_MINI_LOCAL_FALLBACK || process.env.OMO_MINI_LOADED !== "1" || model.id !== process.env.OMO_MINI_MODEL)) {
++            const { pathToFileURL } = await import("node:url");
++            const admission = await import(pathToFileURL(process.env.OMO_MINI_LIFECYCLE_PATH).href);
++            const controller = new AbortController();
++            this._miniModelLoadAbortController = controller;
++            let loaded;
++            try { loaded = await admission.loadForSelection(model.id, controller.signal); }
++            finally { if (controller.signal.aborted) throw new Error("Local model load cancelled"); }
++            model = { ...model, id: loaded.id, name: loaded.id, contextWindow: loaded.loaded_context_length,
++                maxTokens: Math.max(1, Math.min(8192, Math.floor(loaded.loaded_context_length / 4), loaded.loaded_context_length - 3072)),
++                input: loaded.type === "vlm" ? ["text", "image"] : ["text"] };
++        }
+         const liveContextTokens = this._getDownswitchLiveContextTokens(model);
+         const deferral = this._projectSwitchDeferral(model, liveContextTokens);
+         if (deferral === undefined) {
+@@ -4013,6 +4044,9 @@
+             modelSelectSource: "set",
+             invalidateCompaction: true,
+         });
++        } finally {
++            if (process.env.OMO_MINI_LOCAL_PROFILE === "1") { this._miniModelLoadAbortController = undefined; this._miniModelTransition = false; }
++        }
+     }
+     async _maybeRestoreFallbackPrimary() {
+         try {
+@@ -4035,6 +4069,33 @@
+             await this._maybeRestoreFallbackPrimary();
+     }
+     async _switchActiveModel(model, opts) {
++        const automatic = process.env.OMO_MINI_LOCAL_PROFILE === "1" &&
++            (opts.modelSelectSource === "fallback" || opts.modelSelectSource === "fallback-revert");
++        if (automatic) {
++            if (this._miniModelTransition) throw new Error("Local model transition already in progress");
++            this._miniModelTransition = true;
++        }
++        let miniAutomaticController;
++        try {
++        if (automatic) {
++            const local = process.env.OMO_MINI_LOCAL_FALLBACK;
++            if (!local || process.env.OMO_MINI_LOADED !== "1") throw new Error("Local fallback is not available without an active local model");
++            const { primary, entries } = JSON.parse(local);
++            const selector = `${model.provider}/${model.id}`;
++            if (model.provider !== "omo-mini-local" || !(opts.modelSelectSource === "fallback" ? entries.includes(selector) : primary === selector))
++                throw new Error(`Blocked unapproved local fallback ${selector}`);
++            const { pathToFileURL } = await import("node:url");
++            const admission = await import(pathToFileURL(process.env.OMO_MINI_LIFECYCLE_PATH).href);
++            miniAutomaticController = new AbortController();
++            this._miniModelLoadAbortController = miniAutomaticController;
++            const loaded = await admission.loadForSelection(model.id, miniAutomaticController.signal);
++            if (miniAutomaticController.signal.aborted) throw new Error("Local fallback load cancelled");
++            model = { ...model, id: loaded.id, name: loaded.id, contextWindow: loaded.loaded_context_length,
++                maxTokens: Math.max(1, Math.min(8192, Math.floor(loaded.loaded_context_length / 4), loaded.loaded_context_length - 3072)),
++                input: loaded.type === "vlm" ? ["text", "image"] : ["text"] };
++            if (this.model?.provider === model.provider && this.model?.id === model.id)
++                throw new Error("Local fallback resolved to the active model");
++        }
+         const previousModel = this.model;
+         if (opts.invalidateCompaction &&
+             (this._modelSelectionChangesContext(previousModel, model) ||
+@@ -4069,6 +4130,9 @@
+         }
+         this._emitHighReasoningWarningIfNeeded();
+         const previousSystemPrompt = this.agent.state.systemPrompt;
++        let miniSelection;
++        let miniPriorProvider;
++        let miniRegistryChanged = false;
+         try {
+             const systemPromptChange = opts.emitModelSelect
+                 ? await this._emitModelSelect(model, previousModel, opts.modelSelectSource)
+@@ -4092,6 +4156,28 @@
+                 ? this._reduceForSwitchTarget(model, liveContextTokens)
+                 : liveContextTokens;
+             this._assertModelUsableForSwitch(model, admittedLiveContextTokens);
++            if (miniAutomaticController?.signal.aborted || (opts.modelSelectSource === "set" && this._miniModelLoadAbortController?.signal.aborted)) throw new Error("Local model load cancelled");
++            if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && model.provider === "omo-mini-local" &&
++                (process.env.OMO_MINI_LOADED !== "1" || process.env.OMO_MINI_MODEL !== model.id || (opts.modelSelectSource === "set" && process.env.OMO_MINI_LOCAL_FALLBACK && JSON.parse(process.env.OMO_MINI_LOCAL_FALLBACK).primary !== `${model.provider}/${model.id}`))) {
++                const { pathToFileURL } = await import("node:url");
++                const admission = await import(pathToFileURL(process.env.OMO_MINI_LIFECYCLE_PATH).href);
++                miniSelection = admission.stageSelection({ id: model.id, state: "loaded",
++                    type: model.input.includes("image") ? "vlm" : "llm", loaded_context_length: model.contextWindow,
++                    capabilities: ["tool_use"] }, opts.modelSelectSource === "set");
++                miniPriorProvider = this._modelRuntime.getRegisteredProviderConfig("omo-mini-local");
++                const existing = this._modelRuntime.getAvailableSnapshot().filter(item => item.provider === "omo-mini-local");
++                const models = existing.filter(item => item.id !== model.id).map(item => ({
++                    id: item.id, name: item.name, reasoning: item.reasoning, input: item.input,
++                    contextWindow: item.contextWindow, maxTokens: item.maxTokens, cost: item.cost,
++                }));
++                models.push({ id: model.id, name: model.id, reasoning: model.reasoning, input: model.input,
++                    contextWindow: model.contextWindow, maxTokens: model.maxTokens, cost: model.cost });
++                miniRegistryChanged = true;
++                await this._modelRuntime.registerProvider("omo-mini-local", {
++                    baseUrl: process.env.OMO_MINI_BASE_URL, apiKey: "local", api: "openai-completions", models,
++                }, { refresh: false });
++                miniSelection.commit();
++            }
+             if (opts.appendSessionEntry) {
+                 this.sessionManager.appendModelChange(model.provider, model.id, opts.entryReason, previousModel?.provider, previousModel?.id);
+             }
+@@ -4110,9 +4196,24 @@
+                 source: opts.modelSelectSource,
+             });
+             this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
++            miniSelection?.finish();
+             return systemPromptChange;
+         }
+         catch (error) {
++            if (miniSelection) {
++                try {
++                    miniSelection.rollback();
++                    if (miniRegistryChanged) {
++                        if (miniPriorProvider)
++                            await this._modelRuntime.registerProvider("omo-mini-local", miniPriorProvider, { refresh: false });
++                        else
++                            this._modelRuntime.unregisterProvider("omo-mini-local");
++                    }
++                }
++                catch (rollbackError) {
++                    throw new AggregateError([error, rollbackError], "Local model selection and rollback failed");
++                }
++            }
+             if (previousModel)
+                 this.agent.state.model = previousModel;
+             else
+@@ -4124,6 +4225,12 @@
+             this.agent.abortServerSideFallback = previousAbortServerSideFallback;
+             this._currentServiceTier = previousTier;
+             throw error;
++        }
++        } finally {
++            if (automatic) {
++                this._miniModelLoadAbortController = undefined;
++                this._miniModelTransition = false;
++            }
+         }
+     }
+     _applyEphemeralThinkingLevel(level) {
+diff --git a/dist/core/sdk.js b/dist/core/sdk.js
+--- a/dist/core/sdk.js
++++ b/dist/core/sdk.js
+@@ -171,2 +171,11 @@
+     }
++    // A downloaded catalog entry is selectable, not an active inference model.
++    // Keep Native's actual no-model state until /model loads and inspects it.
++    if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && process.env.OMO_MINI_LOADED === "0") {
++        model = undefined;
++        initialModelProvenance = undefined;
++        initialResolvedThinkingLevel = undefined;
++        initialThinkingSelection = undefined;
++        modelFallbackMessage = undefined;
++    }
+     let thinkingLevel = options.thinkingLevel ?? initialResolvedThinkingLevel;
+@@ -207,7 +216,8 @@ export async function createAgentSession(options = {}) {
+     }
+     if (thinkingSelection)
+         thinkingSelection = { ...thinkingSelection, level: thinkingLevel };
+-    const defaultActiveToolNames = ["read", "bash", "edit", "write", "grep"];
++    const defaultActiveToolNames = ["read", "bash", "edit", "write", "grep",
++        ...(process.env.OMO_MINI_LOCAL_PROFILE === "1" ? ["ls", "find"] : [])];
+     const configuredDefaultToolNames = settingsManager.getDefaultTools();
+     const sessionDefaultToolNames = options.tools === undefined && options.noTools === undefined ? configuredDefaultToolNames : undefined;
+     const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
+@@ -351,9 +361,10 @@
+     const session = new AgentSession({
+         agent,
+         sessionManager,
+         settingsManager,
+         cwd,
+         agentDir,
++        fallbackNow: options.fallbackNow,
+         scopedModels,
+         favoriteModels,
+         resourceLoader,
+diff --git a/dist/modes/interactive/components/model-selector.js b/dist/modes/interactive/components/model-selector.js
+--- a/dist/modes/interactive/components/model-selector.js
++++ b/dist/modes/interactive/components/model-selector.js
+@@ -127,4 +127,13 @@
+         try {
+             let result;
+-            if (this.modelRuntime instanceof ModelRegistry) {
++            if (process.env.OMO_MINI_LOCAL_PROFILE === "1") {
++                const { pathToFileURL } = await import("node:url");
++                const lifecycle = await import(pathToFileURL(process.env.OMO_MINI_LIFECYCLE_PATH).href);
++                const models = await lifecycle.catalogModels(this.refreshAbortController.signal);
++                await this.modelRuntime.registerProvider("omo-mini-local", {
++                    baseUrl: process.env.OMO_MINI_BASE_URL, apiKey: "local", api: "openai-completions", models,
++                }, { refresh: false });
++                result = { aborted: false, errors: new Map() };
++            }
++            else if (this.modelRuntime instanceof ModelRegistry) {
+                 await this.modelRuntime.refresh();
+diff --git a/dist/modes/rpc/connection-handler.js b/dist/modes/rpc/connection-handler.js
+--- a/dist/modes/rpc/connection-handler.js
++++ b/dist/modes/rpc/connection-handler.js
+@@ -871,2 +871,3 @@
+     // Handle a single command
++    let selectingLocalModel = false;
+     const handleCommand = async (command) => {
+@@ -1041,3 +1042,15 @@
+-                const systemPromptChange = await session.setModel(model);
+-                return success(id, "set_model", { ...model, systemPromptName: systemPromptChange?.systemPromptName });
++                if (process.env.OMO_MINI_LOCAL_PROFILE !== "1") {
++                    const systemPromptChange = await session.setModel(model);
++                    return success(id, "set_model", { ...model, systemPromptName: systemPromptChange?.systemPromptName });
++                }
++                if (selectingLocalModel) return error(id, "set_model", "Local model selection already in progress");
++                selectingLocalModel = true;
++                // Do not serialize abort behind the potentially long LM Studio load.
++                // The response is sent once the switch succeeds or fails.
++                void session.setModel(model).then((change) => {
++                    output(success(id, "set_model", { ...session.model, systemPromptName: change?.systemPromptName }));
++                }, (cause) => {
++                    output(error(id, "set_model", cause instanceof Error ? cause.message : String(cause)));
++                }).finally(() => { selectingLocalModel = false; });
++                return undefined;
+             }
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index e09f1618a49ec3b830d8adadbf52baf1d93c4574..d31bcc0d69389cd4f0a72ff6d93df46575a2aebd 100644
+index e09f1618a49ec3b830d8adadbf52baf1d93c4574..1709211e18c167828216599590e98fbfe00043f8 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
+@@ -1383,7 +1383,7 @@ export class ExtensionRunner {
+         const transformedMessages = await this.emitContext(messages, excludeExtensionPath);
+         return {
+             messages: transformedMessages,
+-            transformPayload: async (payload) => await this.emitBeforeProviderRequest(payload, excludeExtensionPath),
++            transformPayload: async (payload, request) => await this.emitBeforeProviderRequest(payload, excludeExtensionPath, process.env.OMO_MINI_LOCAL_PROFILE === "1" ? request : undefined),
+             transformHeaders: async (headers) => await this.emitBeforeProviderHeaders(headers),
+         };
+     }
 @@ -1396,16 +1396,14 @@ export class ExtensionRunner {
              if (!handlers || handlers.length === 0)
                  continue;
@@ -37,18 +310,13 @@ index e09f1618a49ec3b830d8adadbf52baf1d93c4574..d31bcc0d69389cd4f0a72ff6d93df465
                  }
              }
          }
-diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
---- a/dist/core/extensions/loader.js
-+++ b/dist/core/extensions/loader.js
-@@ -391,5 +391,8 @@
-         registerMcpServer(name, config) {
-             runtime.assertActive();
-+            // omo-mini's isolated offline profile must not register OmO's remote MCPs.
-+            if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && (name === "context7" || name === "grep_app"))
-+                return;
-             const error = validateMcpServerDeclaration(name, config);
-             if (error) {
-                 throw new Error(error);
+@@ -1589,4 +1596,4 @@ export class ExtensionRunner {
+             : { action: "continue" };
+     }
+ }
+-//# sourceMappingURL=runner.js.map
+\ No newline at end of file
++//# sourceMappingURL=runner.js.map
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
 index 28e453eb1b9aaa7edcccc0189175b6da97603756..f7d7ea24bdc1f413cd93a4c29250b4e2a1015e82 100644
 --- a/dist/core/extensions/types.d.ts
@@ -114,3 +382,469 @@ diff --git a/dist/utils/clipboard-image.js b/dist/utils/clipboard-image.js
      }
      if (!image) {
          return null;
+diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
+--- a/dist/modes/interactive/interactive-mode.js
++++ b/dist/modes/interactive/interactive-mode.js
+@@ -128,6 +128,9 @@ import { createInteractiveTui, createInteractiveTuiReference } from "./tui-rende
+ import { formatDisplayVersion } from "./version-label.js";
+ import { blendWorkingStatusShimmerRgbColor, formatActiveToolWorkingLabel, formatToolHookStatusMessageFrame, formatWorkingStatusMessageFrame, largeSessionWorkingStatusInterval, sanitizeWorkingStatusPlainText, } from "./working-status.js";
+ export { createInteractiveTui, createInteractiveTuiReference } from "./tui-renderer.js";
++// omo-mini: sessions launched by the Mini profile carry Mini's identity, not OmO Native's.
++const miniProfile = () => process.env.OMO_MINI_LOCAL_PROFILE === "1";
++const terminalTitle = () => miniProfile() ? "omo-mini" : APP_TITLE;
+ function llamaCppPostLoginGuidance(actionLabel, loadedModelCount) {
+     return loadedModelCount === 0
+         ? `${actionLabel}. No llama.cpp models are loaded. Use /llama to load a model, then /model to select it.`
+@@ -177,7 +180,7 @@ function getStreamingToolCallPartialJson(content) {
+ function formatToolHookTerminalTitle(event) {
+     const hookName = sanitizeWorkingStatusPlainText(event.hookName) || "hook";
+     const statusMessage = sanitizeWorkingStatusPlainText(event.statusMessage);
+-    return `${APP_TITLE} - ${hookName}: ${statusMessage}`;
++    return `${terminalTitle()} - ${hookName}: ${statusMessage}`;
+ }
+ function isCustomSessionEntry(item) {
+     return "type" in item && item.type === "custom";
+@@ -301,6 +304,9 @@ export function formatResumeCommand(sessionManager) {
+     const sessionFile = sessionManager.getSessionFile();
+     if (!sessionFile || !fs.existsSync(sessionFile))
+         return undefined;
++    // Mini sessions live in Mini's state dir; never point them at the user's OmO Native.
++    if (miniProfile() && process.env.OMO_MINI_RESUME_HINT)
++        return process.env.OMO_MINI_RESUME_HINT;
+     const args = [APP_COMMAND];
+     if (!sessionManager.usesDefaultSessionDir()) {
+         args.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
+@@ -1089,7 +1095,9 @@ export class InteractiveMode {
+             this.headerContainer.addChild(new Spacer(1));
+         }
+         else if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
+-            const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` ${formatDisplayVersion(this.version)}`);
++            const logo = miniProfile() && process.env.OMO_MINI_IDENTITY
++                ? theme.bold(theme.fg("accent", process.env.OMO_MINI_IDENTITY))
++                : theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` ${formatDisplayVersion(this.version)}`);
+             // Build startup instructions using keybinding hint helpers
+             const hint = (keybinding, description) => keyHint(keybinding, description);
+             const expandedInstructions = [
+@@ -1184,9 +1192,9 @@ export class InteractiveMode {
+         const cwdBasename = path.basename(this.sessionManager.getCwd());
+         const sessionName = this.sessionManager.getSessionName();
+         if (sessionName) {
+-            return `${APP_TITLE} - ${sessionName} - ${cwdBasename}`;
++            return `${terminalTitle()} - ${sessionName} - ${cwdBasename}`;
+         }
+-        return `${APP_TITLE} - ${cwdBasename}`;
++        return `${terminalTitle()} - ${cwdBasename}`;
+     }
+     applyTerminalTitle() {
+         const questionHeader = this.shownQuestion?.request.questions[0]?.header ?? this.blockingQuestionHeader;
+@@ -2296,6 +2304,9 @@ export class InteractiveMode {
+      * Set extension status text in the footer.
+      */
+     setExtensionStatus(key, text) {
++        // omo-mini: --omo-senpi-native-badge-disabled is read before Senpi applies CLI flags; drop the badge here.
++        if (miniProfile() && key === "  omo-native")
++            return;
+         this.footerDataProvider.setExtensionStatus(key, text);
+         this.ui.requestRender();
+     }
+@@ -2376,7 +2387,7 @@ export class InteractiveMode {
+         }
+         this.activeToolExecutions.set(event.toolCallId, label);
+         this.workingMessage = label;
+-        this.activeToolExecutionTerminalTitle = `${APP_TITLE} - ${label}`;
++        this.activeToolExecutionTerminalTitle = `${terminalTitle()} - ${label}`;
+         this.refreshWorkingLoaderMessage();
+         this.applyTerminalTitle();
+     }
+@@ -2387,7 +2398,7 @@ export class InteractiveMode {
+         const nextExecution = this.activeToolExecutions.values().next();
+         if (!nextExecution.done) {
+             this.workingMessage = nextExecution.value;
+-            this.activeToolExecutionTerminalTitle = `${APP_TITLE} - ${nextExecution.value}`;
++            this.activeToolExecutionTerminalTitle = `${terminalTitle()} - ${nextExecution.value}`;
+         }
+         else {
+             this.workingMessage = this.workingMessageBeforeActiveTool;
+@@ -4252,7 +4263,7 @@ export class InteractiveMode {
+                         });
+                         this.activeToolExecutions.set(event.toolCallId, label);
+                         this.workingMessage = label;
+-                        this.activeToolExecutionTerminalTitle = `${APP_TITLE} - ${label}`;
++                        this.activeToolExecutionTerminalTitle = `${terminalTitle()} - ${label}`;
+                         this.refreshWorkingLoaderMessage();
+                         this.applyTerminalTitle();
+                     }
+@@ -6346,8 +6357,15 @@ export class InteractiveMode {
+         // auth round trip. Release and repaint first, then apply the switch.
+         done?.();
+         this.ui?.requestRender();
++        const loadingLocal = process.env.OMO_MINI_LOCAL_PROFILE === "1" && model.provider === "omo-mini-local" &&
++            (!this.session.model || this.session.model.id !== model.id || this.session.model.contextWindow <= 0);
++        const previousStatus = loadingLocal ? this.footerDataProvider.getExtensionStatuses().get("omo-mini") : undefined;
++        if (loadingLocal)
++            this.setExtensionStatus("omo-mini", `LOCAL | Loading model ${model.id}... | ${process.env.OMO_MINI_ROOT}`);
++        let selectedModel;
+         try {
+             const systemPromptChange = await this.session.setModel(model);
++            selectedModel = systemPromptChange?.model ?? this.session.model;
+             this.footer.invalidate();
+             // A model switch ends any external-owner delegation episode.
+             this.externalOwnerCompactionNoticeShown = false;
+@@ -6364,6 +6382,12 @@ export class InteractiveMode {
+         catch (error) {
+             this.showError(error instanceof Error ? error.message : String(error));
+         }
++        finally {
++            if (loadingLocal)
++                this.setExtensionStatus("omo-mini", selectedModel
++                    ? `LOCAL ${selectedModel.id} | ${selectedModel.contextWindow} ctx | ${process.env.OMO_MINI_ROOT}`
++                    : previousStatus);
++        }
+     }
+     async resolveFavoriteModelsForUi(patterns, candidateModels) {
+         const candidateIds = new Set(candidateModels.map(getModelFullId));
+diff --git a/dist/core/sdk.d.ts b/dist/core/sdk.d.ts
+--- a/dist/core/sdk.d.ts
++++ b/dist/core/sdk.d.ts
+@@ -18,4 +18,6 @@
+     /** Global config directory. Default: ~/.pi/agent */
+     agentDir?: string;
++    /** Forward Native AgentSessionConfig's clock for deterministic cooldown tests. */
++    fallbackNow?: () => number;
+     /** Canonical model/auth runtime. Defaults to a runtime using agentDir/auth.json and models.json. */
+     modelRuntime?: ModelRuntime;
+diff --git a/dist/core/retry-fallback/controller.js b/dist/core/retry-fallback/controller.js
+--- a/dist/core/retry-fallback/controller.js
++++ b/dist/core/retry-fallback/controller.js
+@@ -132,7 +132,10 @@
+         await this.deps.switchModel(candidate.model, thinking, "fallback");
+         this.triedSelectors.add(baseSelector(candidate.selector));
+         const from = formatSelector(current.model);
+-        const to = formatSelector(candidate.model);
++        // Local admission can turn a downloaded key into a newly loaded instance ID.
++        const applied = this.deps.getCurrentSelector()?.model ?? candidate.model;
++        const to = formatSelector(applied);
++        this.triedSelectors.add(to);
+         const prior = this.state;
+         const pinnedByRefusal = prior?.pinnedByRefusal === true || reason === "refusal";
+         const pinnedByBilling = prior?.pinnedByBilling === true || reason === "billing";
+diff --git a/dist/main.js b/dist/main.js
+--- a/dist/main.js
++++ b/dist/main.js
+@@ -950,7 +950,8 @@ export async function main(args, options) {
+     const startupLoadingIndicator = createStartupLoadingIndicator({
+         writer: (chunk) => process.stdout.write(chunk),
+         isTTY: process.stdout.isTTY === true,
+-        label: `Loading ${APP_NAME}`,
++        // omo-mini: the Mini profile starts under its own product name.
++        label: `Loading ${process.env.OMO_MINI_LOCAL_PROFILE === "1" ? "omo-mini" : APP_NAME}`,
+     });
+     if (shouldShowStartupLoadingIndicator({
+         appMode,
+diff --git a/dist/cli.js b/dist/cli.js
+--- a/dist/cli.js
++++ b/dist/cli.js
+@@ -58,7 +58,8 @@ if (reexecUnderBunIfNeeded()) {
+ // imports on the fast path below, and it publishes NODE_COMPILE_CACHE so a spawned cli-main child
+ // inherits this process's cache directory instead of resolving and re-filling its own.
+ enableStartupCompileCache();
+-process.title = APP_NAME;
++// omo-mini: the Mini profile titles its terminal with its own product name.
++process.title = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? "omo-mini" : APP_NAME;
+ process.env.PI_CODING_AGENT = "true";
+ process.env.AI_AGENT = APP_NAME;
+ process.emitWarning = (() => { });
+diff --git a/dist/modes/rpc/rpc-client.js b/dist/modes/rpc/rpc-client.js
+--- a/dist/modes/rpc/rpc-client.js
++++ b/dist/modes/rpc/rpc-client.js
+@@ -284,6 +284,10 @@ export class RpcClient {
+         if (this.sessionId === sessionId)
+             this.sessionId = undefined;
+     }
++    /** Send a command to an explicitly addressed session on this host. */
++    async requestSession(command, sessionId) {
++        return this.getData(await this.send({ ...command, sessionId }, false));
++    }
+     async listSessions() {
+         const response = await this.send({ type: "list_sessions" }, false);
+         return this.getData(response).sessions;
+diff --git a/dist/modes/rpc/rpc-client.d.ts b/dist/modes/rpc/rpc-client.d.ts
+--- a/dist/modes/rpc/rpc-client.d.ts
++++ b/dist/modes/rpc/rpc-client.d.ts
+@@ -123,6 +123,8 @@ export declare class RpcClient {
+     /** Draft update for an open `question` request; fire-and-forget like the response. */
+     sendExtensionUIProgress(progress: RpcExtensionUIProgress): Promise<void>;
+     closeSession(sessionId?: string | undefined): Promise<void>;
++    /** Send a command to an explicitly addressed session on this host. */
++    requestSession(command: { type: string; [key: string]: unknown }, sessionId: string): Promise<Record<string, unknown>>;
+     listSessions(): Promise<Array<{
+         sessionId: string;
+         durableSessionId?: string;
+diff --git a/dist/modes/rpc/rpc-types.d.ts b/dist/modes/rpc/rpc-types.d.ts
+--- a/dist/modes/rpc/rpc-types.d.ts
++++ b/dist/modes/rpc/rpc-types.d.ts
+@@ -438,6 +438,8 @@ export type RpcCommand = (RpcSessionCommand & {
+     id?: string;
+     type: "close_session";
+     sessionId: string;
++    /** Reject unless exactly one attachment owns a completely idle session. */
++    if_idle?: boolean;
+ } | {
+     id?: string;
+     type: "list_sessions";
+diff --git a/dist/modes/rpc/session-command-router.js b/dist/modes/rpc/session-command-router.js
+--- a/dist/modes/rpc/session-command-router.js
++++ b/dist/modes/rpc/session-command-router.js
+@@ -693,6 +693,14 @@ export class SessionCommandRouter {
+         const owner = this.writer.currentConnection();
+         if (owner !== undefined && this.sessionsByConnection.get(owner)?.has(command.sessionId) !== true)
+             return error(command.id, "close_session", RPC_ERROR_UNKNOWN_SESSION);
++        // A peer move must not abort an active turn, background task, or another client's session.
++        // The check and the close claim below are synchronous within this host dispatch.
++        if (command.if_idle === true) {
++            const entry = this.registry.peek(command.sessionId);
++            if (entry?.state !== "open" || entry.attachments !== 1 ||
++                entry.worker?.busy === true || entry.runtime?.session.isSessionBusy !== false)
++                return error(command.id, "close_session", "session_busy");
++        }
+         const reply = this.writer.reserveCloseResponse(command.sessionId, response);
+         if (!reply)
+             return undefined;
+diff --git a/dist/core/project-trust.js b/dist/core/project-trust.js
+--- a/dist/core/project-trust.js
++++ b/dist/core/project-trust.js
+@@ -2,7 +2,9 @@ import { APP_NAME, CONFIG_DIR_NAME } from "../config.js";
+ import { emitProjectTrustEvent } from "./extensions/runner.js";
+ import { getProjectTrustOptions, hasTrustRequiringProjectResources, } from "./trust-manager.js";
+ function formatProjectTrustPrompt(cwd) {
+-    return `Trust project folder?\n${cwd}\n\nThis allows ${APP_NAME} to load ${CONFIG_DIR_NAME} settings and resources, install missing project packages, and execute project extensions.`;
++    // omo-mini: the Mini profile asks for trust under its own name, not OmO Native's.
++    const appName = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? "omo-mini" : APP_NAME;
++    return `Trust project folder?\n${cwd}\n\nThis allows ${appName} to load ${CONFIG_DIR_NAME} settings and resources, install missing project packages, and execute project extensions.`;
+ }
+ async function selectProjectTrustOption(cwd, ctx) {
+     const options = getProjectTrustOptions(cwd, { includeSessionOnly: true });
+diff --git a/dist/core/extensions/builtin/hooks/trust-storage.js b/dist/core/extensions/builtin/hooks/trust-storage.js
+--- a/dist/core/extensions/builtin/hooks/trust-storage.js
++++ b/dist/core/extensions/builtin/hooks/trust-storage.js
+@@ -35,6 +35,11 @@ export class FileHookStateStorage {
+         if (snapshot !== undefined) {
+             return snapshot;
+         }
++        // omo-mini: no project state directory means no snapshot and no writer holding the lock
++        // (writers create it first), so skip the lock instead of creating <cwd>/.omo just by running.
++        if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && scope === "project" && !existsSync(dirname(path))) {
++            return emptyHookTrustState();
++        }
+         let release;
+         try {
+             release = acquireHookStateLockSync(path);
+@@ -166,4 +171,4 @@ function runWithHookStateLockRelease(release, operation) {
+     release();
+     return result;
+ }
+-//# sourceMappingURL=trust-storage.js.map
+\ No newline at end of file
++//# sourceMappingURL=trust-storage.js.map
+diff --git a/dist/utils/tools-manager.js b/dist/utils/tools-manager.js
+--- a/dist/utils/tools-manager.js
++++ b/dist/utils/tools-manager.js
+@@ -11,6 +11,10 @@
+ const NETWORK_TIMEOUT_MS = 10_000;
+ const DOWNLOAD_TIMEOUT_MS = 120_000;
+ function isOfflineModeEnabled() {
++    // omo-mini: its PI_OFFLINE only stops remote catalog/startup fetches. fd/rg still install on
++    // demand, into the profile-isolated agent bin dir, exactly as Native does.
++    if (process.env.OMO_MINI_LOCAL_PROFILE === "1")
++        return false;
+     const value = envValue("OFFLINE");
+     if (!value)
+         return false;
+diff --git a/dist/core/tools/grep/format.js b/dist/core/tools/grep/format.js
+--- a/dist/core/tools/grep/format.js
++++ b/dist/core/tools/grep/format.js
+@@ -42,8 +42,12 @@ export function formatGrepContent(result, { now = () => result.scan.elapsedMs }
+         notes.push(`Pattern searched literally: ${scan.effectivePattern}`);
+     if (scan.patternKind === "sanitized")
+         notes.push(`Pattern sanitized: ${scan.effectivePattern}`);
+-    const footer = `[grep: matches=${result.matchCount ?? "n/a"} files=${result.fileCount} searched=${scan.filesSearched} elapsedMs=${Math.max(0, Math.round(now()))} engine=${result.engine} nextSkip=${result.nextSkip ?? "none"}]`;
++    // omo-mini: a capped result must not read as complete; skip pages files, never matches within one.
++    const limitReached = process.env.OMO_MINI_LOCAL_PROFILE === "1" && (result.perFileLimitReached || result.totalLimitReached);
++    if (limitReached)
++        notes.push("Match limit reached: more matches exist than shown, and skip pages files, not matches within a file. Narrow the pattern, raise limit, or search a line range with path \"file:Lstart-Lend\".");
++    const footer = `[grep: matches=${result.matchCount ?? "n/a"}${limitReached ? " limitReached=true" : ""}${limitReached && result.totalMatches !== undefined ? ` totalMatches=${result.totalMatches}` : ""} files=${result.fileCount} searched=${scan.filesSearched} elapsedMs=${Math.max(0, Math.round(now()))} engine=${result.engine} nextSkip=${result.nextSkip ?? "none"}]`;
+     const body = `${blocks.join("\n\n")}\n${notes.length ? `\n${notes.join("\n")}` : ""}`;
+     return [{ type: "text", text: body }, modelOnlyText(footer)];
+ }
+-//# sourceMappingURL=format.js.map
+\ No newline at end of file
++//# sourceMappingURL=format.js.map
+diff --git a/dist/core/extensions/builtin/compaction/speculative-summary.js b/dist/core/extensions/builtin/compaction/speculative-summary.js
+--- a/dist/core/extensions/builtin/compaction/speculative-summary.js
++++ b/dist/core/extensions/builtin/compaction/speculative-summary.js
+@@ -113,9 +113,11 @@ export async function generateSummaryMessage(options) {
+             apiKey: options.auth.apiKey,
+             headers,
+             extraBody: options.auth.extraBody,
+-            onPayload: async (payload, model) => {
++            // omo-mini: forward the runtime's request metadata (the resolved model) so before_provider_request
++            // handlers can verify the summary request like an agent turn; the runner drops it outside Mini.
++            onPayload: async (payload, model, request) => {
+                 const sanitized = model.api === "anthropic-messages" ? sanitizeAnthropicPayload(payload) : payload;
+-                return providerRequest ? await providerRequest.transformPayload(sanitized) : sanitized;
++                return providerRequest ? await providerRequest.transformPayload(sanitized, request) : sanitized;
+             },
+             maxTokens: summaryMaxTokens(options.snapshot.model, options.snapshot.contextWindow),
+             signal: requestController.signal,
+@@ -142,4 +144,4 @@ export async function generateSummaryMessage(options) {
+             options.signal.removeEventListener("abort", onCallerAbort);
+     }
+ }
+-//# sourceMappingURL=speculative-summary.js.map
+\ No newline at end of file
++//# sourceMappingURL=speculative-summary.js.map
+diff --git a/dist/core/extensions/builtin/compaction/deterministic-fallback.js b/dist/core/extensions/builtin/compaction/deterministic-fallback.js
+--- a/dist/core/extensions/builtin/compaction/deterministic-fallback.js
++++ b/dist/core/extensions/builtin/compaction/deterministic-fallback.js
+@@ -57,6 +57,19 @@ function hasMeaningfulUserText(entry) {
+         return false;
+     return content.some((block) => isRecord(block) && block.type === "text" && hasVisibleText(block.text));
+ }
++// omo-mini: the latest meaningful user request, verbatim and capped like a summary task intent.
++function latestUserRequest(branchEntries) {
++    const entry = branchEntries.findLast(hasMeaningfulUserText);
++    if (!entry)
++        return undefined;
++    const content = entry.message.content;
++    const text = (typeof content === "string" ? content : content
++        .filter((block) => isRecord(block) && block.type === "text" && typeof block.text === "string")
++        .map((block) => block.text)
++        .join("\n")).trim();
++    const capped = capUtf8Bytes(text, 4096);
++    return capped === text ? text : `${capped}\n[Request truncated]`;
++}
+ /**
+  * Bound a value graph that came from persisted, potentially hostile session data.
+  * Returns false when the graph contains anything we must not read (accessors,
+@@ -187,7 +200,11 @@ export function createRequiredCompactionFallback(preparation, contextWindow, fai
+         "Continue from the retained messages after this checkpoint. Treat omitted transcript details as unknown.",
+     ].join("\n");
+     const taskIntent = metadata.taskIntent?.trim();
+-    const fixedText = taskIntent ? `${marker}\n\nTask intent:\n${taskIntent}` : marker;
++    const intentText = taskIntent ? `${marker}\n\nTask intent:\n${taskIntent}` : marker;
++    // omo-mini: an inherited intent exists only after a successful summary; without the request, a
++    // first fallback leaves the model no task once the user turn falls before the kept boundary.
++    const latestRequest = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? latestUserRequest(branchEntries) : undefined;
++    const fixedText = latestRequest ? `${intentText}\n\nLatest user request:\n${latestRequest}` : intentText;
+     const maxSummaryBytes = Math.max(1_024, Math.floor(contextWindow * 0.4));
+     const previousSummary = preparation.previousSummary?.trim();
+     let summary = fixedText;
+@@ -449,4 +466,4 @@ export function createRequiredCompactionFallback(preparation, contextWindow, fai
+         diagnostics.candidatesChecked = candidateCount;
+     return undefined;
+ }
+-//# sourceMappingURL=deterministic-fallback.js.map
+\ No newline at end of file
++//# sourceMappingURL=deterministic-fallback.js.map
+diff --git a/dist/core/extensions/builtin/terminal/extension.js b/dist/core/extensions/builtin/terminal/extension.js
+--- a/dist/core/extensions/builtin/terminal/extension.js
++++ b/dist/core/extensions/builtin/terminal/extension.js
+@@ -367,10 +367,12 @@ export function registerTerminalExtension(pi) {
+     };
+     const toolCtx = buildToolContext(pi, state);
+     pi.registerTool(createPtyBashTool(toolCtx));
+-    pi.registerTool(createBashOutputTool(toolCtx));
+-    pi.registerTool(createBashInputTool(toolCtx));
+-    pi.registerTool(createBashResizeTool(toolCtx));
+-    pi.registerTool(createKillBashTool(toolCtx));
++    // omo-mini: session tools follow bash into eval; only eval can start the background bash whose bash_id they need.
++    const sessionExposure = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? { exposure: "eval" } : {};
++    pi.registerTool({ ...createBashOutputTool(toolCtx), ...sessionExposure });
++    pi.registerTool({ ...createBashInputTool(toolCtx), ...sessionExposure });
++    pi.registerTool({ ...createBashResizeTool(toolCtx), ...sessionExposure });
++    pi.registerTool({ ...createKillBashTool(toolCtx), ...sessionExposure });
+     pi.registerTool(createMonitorTool(toolCtx));
+     pi.on("session_start", async (event, ctx) => {
+         state.ctx = ctx;
+@@ -495,4 +497,4 @@ export function registerTerminalExtension(pi) {
+     });
+ }
+ export default registerTerminalExtension;
+-//# sourceMappingURL=extension.js.map
+\ No newline at end of file
++//# sourceMappingURL=extension.js.map
+diff --git a/dist/core/tools/grep/index.js b/dist/core/tools/grep/index.js
+--- a/dist/core/tools/grep/index.js
++++ b/dist/core/tools/grep/index.js
+@@ -165,6 +165,7 @@ export function createGrepToolDefinition(cwd, options) {
+             let fileMatches = [];
+             let perFileLimitReached = false;
+             let totalLimitReached = false;
++            let totalMatches;
+             if (mode === "content") {
+                 const groups = new Map();
+                 for (const row of result.matches)
+@@ -202,6 +203,21 @@ export function createGrepToolDefinition(cwd, options) {
+                         counts.set(row.path, (counts.get(row.path) ?? 0) + 1);
+                 matches = matches.filter((row) => counts.has(row.path));
+                 fileMatches = [...counts].map(([path, count]) => ({ path, count }));
++                // omo-mini: a capped result also counts every matching line of the searched files (count mode, no
++                // per-file cap), so a pattern that matches nearly everything is visible without paging.
++                if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && (perFileLimitReached || totalLimitReached)) {
++                    const counted = await searchPattern(engine, {
++                        ...request,
++                        paths: singleFile ? paths : selected.map((path) => resolve(workingCwd, path)),
++                        pattern: result.effectivePattern,
++                        literal: request.literal || result.patternKind === "literal",
++                        pcre2: result.regexEngine === "pcre2",
++                        mode: "count",
++                        timeoutMs: Math.max(0, (input.timeoutMs ?? 30000) - (Date.now() - started)),
++                    }, signal);
++                    if (!counted.result.timedOut)
++                        totalMatches = counted.result.counts.matches;
++                }
+             }
+             else if (singleFile || selected.length)
+                 fileMatches = result.fileCounts.map(({ path, count }) => ({ path, count }));
+@@ -232,6 +248,7 @@ export function createGrepToolDefinition(cwd, options) {
+                 totalLimitReached,
+                 scan,
+                 linesTruncated: matches.some((row) => row.truncated),
++                ...(totalMatches === undefined ? {} : { totalMatches }),
+             };
+             return { content: formatGrepContent(details), details };
+         },
+@@ -241,4 +258,4 @@ export function createGrepToolDefinition(cwd, options) {
+ export function createGrepTool(cwd, options) {
+     return wrapToolDefinition(createGrepToolDefinition(cwd, options));
+ }
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
++//# sourceMappingURL=index.js.map
+diff --git a/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js/display-image.js b/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js/display-image.js
+--- a/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js/display-image.js
++++ b/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js/display-image.js
+@@ -132,6 +132,9 @@ export function resolveDisplayOps(value) {
+ 			: [frame(value.mimeType, payload.dataBase64)];
+ 	}
+ 	if (isImageFrame(value)) return [frame(value.mimeType, value.dataBase64)];
++	// omo-mini: marshalToolResult's text-only form ({ text }, e.g. a failed bash) shows as plain lines like the full form, not one column-clamped JSON line.
++	if (process.env.OMO_MINI_LOCAL_PROFILE === "1" && typeof value.text === "string" && Object.keys(value).length === 1)
++		return value.text === "" ? [] : [{ kind: "text", text: value.text }];
+ 	if (isMarshalledToolResult(value)) {
+ 		const frames = value.images.map((image) => frame(image.mimeType, image.dataBase64));
+ 		return value.text === "" ? frames : [{ kind: "text", text: value.text }, ...frames];
+diff --git a/dist/modes/rpc/host-ensure.js b/dist/modes/rpc/host-ensure.js
+--- a/dist/modes/rpc/host-ensure.js
++++ b/dist/modes/rpc/host-ensure.js
+@@ -24,7 +24,9 @@
+ export { probeHost } from "./host-probe.js";
+ const SPAWNED_HOST_PROBE_TIMEOUT_MS = 10_000;
+ const EXISTING_HOST_PROBE_TIMEOUT_MS = 10_000;
+-const DEFAULT_READINESS_TIMEOUT_MS = 10_000;
++// omo-mini: a Mini host loads the full OmO plugin before it answers on its socket, and a cold
++// start on a slow Windows machine can pass 10s. The profile waits longer before giving up.
++const DEFAULT_READINESS_TIMEOUT_MS = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? 30_000 : 10_000;
+ const DEFAULT_STOP_TIMEOUT_MS = 10_000;
+ const SIGKILL_GRACE_MS = 2_000;
+ /**

@@ -9,7 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build ./src/cli.ts --target bun --outfile ./dist/cli.js --external omo-ai && bun build ./src/extension.ts --target bun --outfile ./dist/extension.js --external @code-yeongyu/senpi"
+    "build": "bun build ./src/cli.ts --target bun --outfile ./dist/cli.js --external omo-ai && bun build ./src/extension.ts --target bun --outfile ./dist/extension.js --external @code-yeongyu/senpi && bun build ./src/model-admission.ts --target bun --outfile ./dist/model-admission.js --external @code-yeongyu/senpi && bun build ./src/reflection-supervisor.ts --target bun --outfile ./dist/reflection-supervisor.js --external omo-ai && bun build ./src/reflection-extension.ts --target bun --outfile ./dist/reflection-extension.js --external @code-yeongyu/senpi && bun build ./src/peer-thread.ts --target bun --outfile ./dist/peer-thread.js --external @code-yeongyu/senpi"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.1",

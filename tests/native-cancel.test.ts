@@ -6,7 +6,10 @@ import { join } from "node:path";
 
 test("native RPC abort stops an open local provider stream and reports cancellation", async () => {
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
-    if (new URL(request.url).pathname === "/api/v0/models") return Response.json({ data: [{ id: "fixture", state: "loaded", type: "llm", loaded_context_length: 200000, capabilities: ["tool_use"] }] });
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/models") return Response.json({ models: [{ key: "fixture", type: "llm",
+      capabilities: { trained_for_tool_use: true, vision: false }, loaded_instances: [{ id: "fixture", config: { context_length: 200000 } }] }] });
+    if (path !== "/v1/chat/completions") return new Response("Not Found", { status: 404 });
     return new Response(new ReadableStream({ start(controller) {
       controller.enqueue(new TextEncoder().encode('data: {"id":"one","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Partial answer"},"finish_reason":null}]}\n\n'));
     } }), { headers: { "content-type": "text/event-stream" } });
@@ -28,11 +31,14 @@ test("native RPC abort stops an open local provider stream and reports cancellat
   });
   function wait(match: (frame: { type: string; id?: string; success?: boolean; aborted?: boolean }) => boolean) {
     return new Promise<{ type: string; id?: string; success?: boolean; aborted?: boolean }>((resolve, reject) => {
-      const timeout = setTimeout(() => { listeners.delete(onFrame); reject(new Error(`Native abort timed out: ${errors.slice(-500)}`)); }, 30000);
+      const cleanup = () => { clearTimeout(timeout); listeners.delete(onFrame); proc.off("exit", onExit); };
+      const onExit = () => { cleanup(); reject(new Error(`Native exited before abort event: ${errors.slice(-500)}`)); };
+      const timeout = setTimeout(() => { cleanup(); reject(new Error(`Native abort timed out: ${errors.slice(-500)}`)); }, 30000);
       const onFrame = (frame: { type: string; id?: string; success?: boolean; aborted?: boolean }) => {
-        if (match(frame)) { clearTimeout(timeout); listeners.delete(onFrame); resolve(frame); }
+        if (match(frame)) { cleanup(); resolve(frame); }
       };
       listeners.add(onFrame);
+      proc.once("exit", onExit);
     });
   }
   try {
@@ -45,7 +51,19 @@ test("native RPC abort stops an open local provider stream and reports cancellat
     expect((await abort).success).toBe(true);
     expect((await ended).aborted).toBe(true);
   } finally {
-    proc.stdin.end(); if (proc.exitCode === null) proc.kill();
-    server.stop(true); await rm(dir, { recursive: true, force: true });
+    try {
+      // Native reaches process.exit within ~160ms of EOF, but on a Windows runner the first Native process of a fresh profile
+      // took 8.1-17.1s more to terminate (CI run 36453082769); 45s bounds that OS exit, not the product shutdown.
+      proc.stdin.end();
+      if (proc.exitCode === null && proc.signalCode === null) await new Promise<void>((accept, reject) => {
+        let settled = false;
+        const onExit = () => { if (settled) return; settled = true; clearTimeout(timer); proc.off("exit", onExit); accept(); };
+        const timer = setTimeout(() => { if (settled) return; settled = true; proc.off("exit", onExit); proc.kill(); reject(new Error(`Native abort cleanup timed out (pid ${proc.pid}): ${errors.slice(-500)}`)); }, 45000);
+        proc.once("exit", onExit);
+        if (proc.exitCode !== null || proc.signalCode !== null) onExit();
+      });
+    } finally {
+      try { server.stop(true); } finally { await rm(dir, { recursive: true, force: true }); }
+    }
   }
 }, 70000);

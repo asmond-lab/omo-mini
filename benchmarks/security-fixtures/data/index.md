@@ -1,0 +1,1 @@
+Active service configuration is in `active/runtime.conf`; `archive/runtime.conf` is an old decoy. The worker's authoritative retry limit is the `retry_limit` entry in the active file. Read files, then write `answer.json` as a JSON object with exactly keys `path` (relative path) and `retryLimit` (number). Do not infer the answer from this note.
