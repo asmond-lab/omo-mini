@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -219,7 +220,8 @@ test("Native Mini peer hosts retain independent guards, resume after caller rest
       alpha.thread?.sessionPath ?? "", "alpha-instance", "ALPHA-STILL-551");
     const outside = await second.turn("OTHER-CWD-550", "other-cwd");
     expect(outside.kind).toBe("ok");
-    expect(outside.thread?.cwd).toBe(other);
+    // Peer cwd is canonical; a runner temp dir can be an 8.3 short path.
+    expect(outside.thread?.cwd).toBe(realpathSync.native(other));
     // The isolated project-config check applies at an explicit peer cwd too.
     const refused = await second.turn("HOSTILE-CWD-552", "hostile-cwd");
     expect(refused.kind).toBe("error");
