@@ -89,7 +89,11 @@ function forbidden(path: string): boolean { return pathSegments(path).some((part
 export async function resolveReflectionPath(worktree: string, path: string, writable = false): Promise<string> {
   if (!path || path.includes("\0")) throw new ReflectionToolError("invalid_path", "Path is empty or contains NUL");
   const root = await realpath(worktree);
-  const target = resolve(root, path);
+  // Native resolves tool paths against a cwd that can name this worktree through an alias of its
+  // real path (a Windows 8.3 short name or a junction). Rebase such a path onto the real root.
+  const aliased = relative(resolve(worktree), resolve(root, path));
+  const target = isAbsolute(path) && aliased !== ".." && !aliased.startsWith(`..${sep}`) && !isAbsolute(aliased)
+    ? resolve(root, aliased) : resolve(root, path);
   const rel = relative(root, target);
   if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) || forbidden(rel)) throw new ReflectionToolError("invalid_path", "Path escapes or enters protected reflection space");
   if (pathSegments(rel).some((part) => /[:\s.]$/.test(part) || part.includes(":") || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) throw new ReflectionToolError("invalid_path", "Path uses an unsafe Windows alias or device name");

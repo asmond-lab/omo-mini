@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { commitReflectionFiles, readReflectionInput, ReflectionToolError, resolveReflectionPath } from "../src/reflection-tools.ts";
@@ -151,14 +151,32 @@ test("resolveReflectionPath rejects protected aliases and uncommittable writes",
     const readable = await resolveReflectionPath(f.repo, ".");
     const writable = await resolveReflectionPath(f.repo, "notes/new.md", true);
     // Then: ordinary paths resolve, while protected and out-of-scope paths fail.
-    expect(readable).toBe(resolve(f.repo));
-    expect(writable).toBe(resolve(f.repo, "notes/new.md"));
+    // Resolved paths are canonical; a runner temp dir can be an 8.3 short path.
+    const real = await realpath(f.repo);
+    expect(readable).toBe(real);
+    expect(writable).toBe(resolve(real, "notes/new.md"));
     for (const path of [outside, ".git/config", ".tmp/scratch.md", "system/boundaries.md", "root.md", "system/NUL.md", "system/trailing. /note.md"]) {
       await expect(resolveReflectionPath(f.repo, path, true)).rejects.toMatchObject({ code: "invalid_path" });
     }
   } finally { await f.cleanup(); }
 });
 
+
+test("resolveReflectionPath accepts an absolute path through another name of the worktree", async () => {
+  const f = await fixture();
+  try {
+    // Given: the worktree named through a junction, as Native's cwd can name it through an 8.3 alias.
+    const alias = join(f.root, "alias");
+    await symlink(f.repo, alias, "junction");
+    // When: a file tool passes an absolute path spelled through that name.
+    const writable = await resolveReflectionPath(alias, join(alias, "notes", "new.md"), true);
+    // Then: it resolves inside the real worktree, while escapes and protected paths still fail.
+    expect(writable).toBe(resolve(await realpath(f.repo), "notes/new.md"));
+    for (const path of [join(alias, "..", "outside.md"), join(alias, ".git", "config"), join(alias, "system", "boundaries.md")]) {
+      await expect(resolveReflectionPath(alias, path, true)).rejects.toMatchObject({ code: "invalid_path" });
+    }
+  } finally { await f.cleanup(); }
+});
 
 test("readReflectionInput advances through JSON-escaped tool output within its page budget", async () => {
   const f = await fixture();
