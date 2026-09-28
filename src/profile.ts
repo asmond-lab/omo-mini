@@ -278,7 +278,10 @@ export async function prepareProfile(options: Options) {
     categories: localCategories(memoryModel),
     // Native keeps task records and session locks in <cwd>/.omo/senpi-task by default. That
     // workspace .omo trips Native's project config watcher mid-turn; keep them in Mini state.
-    task: { state_dir: join(paths.state, "senpi-task") },
+    // Native's "auto" mode starts task children as separate processes on Linux/macOS (in-process
+    // on Windows). Those children do not get this launcher's flags, so Native's first-run
+    // onboarding sent an unrequested local inference turn before the delegated prompt.
+    task: { state_dir: join(paths.state, "senpi-task"), default_execution_mode: "in-process" },
   }, null, 2) + "\n");
   await writeFile(join(paths.agent, "models.json"), JSON.stringify(modelsConfig(model, options.baseUrl, downloaded), null, 2) + "\n");
   // A 9B local model cannot afford the upstream 16K compaction and 20K recent-history defaults.

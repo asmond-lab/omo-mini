@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -98,6 +98,11 @@ test("Native foreground quick task completes through the selected local child mo
     expect(chat.every(body => body.model === "parity-local")).toBe(true);
     expect(chat.some(body => body.messages?.some(message => message.role === "tool" && message.tool_call_id === "task-call-1" && JSON.stringify(message.content).includes(answer)))).toBe(true);
     expect(JSON.stringify(frames.filter(frame => frame.type === "agent_end").at(-1))).toContain("Delegation finished.");
+    // The child ran in-process on every platform, so it shared this launcher's flags.
+    const taskDir = join(root, "state", "senpi-task", "tasks");
+    const tasks = await Promise.all((await readdir(taskDir)).filter(name => name.endsWith(".json"))
+      .map(async name => JSON.parse(await readFile(join(taskDir, name), "utf8")) as { execution_mode?: string }));
+    expect(tasks.map(task => task.execution_mode)).toEqual(["in-process"]);
   } finally {
     for (const cancel of pending) cancel(new Error("Native delegation fixture stopped"));
     if (processChild && processChild.exitCode === null) {
