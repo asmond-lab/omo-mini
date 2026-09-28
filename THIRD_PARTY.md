@@ -6,7 +6,7 @@
 
 **Prominent modification notice:** omo-mini modifies two upstream packages, `@code-yeongyu/senpi@2026.9.23-5` and `omo-ai@5.0.0-0.beta.88`. The modifications are kept as patch files, `patches/@code-yeongyu%2Fsenpi@2026.9.23-5.patch` and `patches/omo-ai@5.0.0-0.beta.88.patch`, and Bun's `patchedDependencies` applies them to this project's local copies when `bun install` runs here. No installed global OmO or Senpi files are modified. Most changes take effect only in the omo-mini local profile: they check `OMO_MINI_LOCAL_PROFILE === "1"` or another `OMO_MINI_*` variable that the omo-mini launcher sets for its sessions. Changes marked *(all profiles)* apply whenever the patched package runs. Rationale: [docs/provider-rejection.md](docs/provider-rejection.md).
 
-`@code-yeongyu/senpi@2026.9.23-5` (26 files; paths relative to the package root):
+`@code-yeongyu/senpi@2026.9.23-5` (27 files; paths relative to the package root):
 - `dist/core/extensions/runner.js`: *(all profiles)* a `before_provider_request` handler result `{ action: "reject", reason: string }` fails the request before transport, while ordinary handler exceptions are still logged and ignored; in the profile, handlers also receive the request's resolved model and headers.
 - `dist/core/extensions/types.d.ts`: *(all profiles)* comment documenting that reject result.
 - `dist/core/extensions/builtin/compaction/speculative-summary.js`: passes compaction summary request metadata to `before_provider_request`; the runner drops it outside the profile.
@@ -21,6 +21,7 @@
 - `dist/modes/rpc/rpc-client.js`, `dist/modes/rpc/rpc-client.d.ts`: *(all profiles)* add `requestSession(command, sessionId)` to send a command to one explicitly addressed session.
 - `dist/modes/rpc/rpc-types.d.ts`: *(all profiles)* adds the optional `if_idle` field to `close_session`.
 - `dist/modes/rpc/session-command-router.js`: *(all profiles, opt-in)* `close_session` with `if_idle: true` returns `session_busy` unless the session is open, has exactly one attachment, and neither its worker nor its session is busy.
+- `dist/modes/rpc/host-ensure.js`: a newly spawned RPC host gets 30 seconds instead of 10 to answer `get_protocol_info` before startup fails.
 - `dist/main.js`: the startup loading label reads `omo-mini`.
 - `dist/cli.js`: the process title reads `omo-mini`.
 - `dist/core/project-trust.js`: the project trust prompt names `omo-mini`.

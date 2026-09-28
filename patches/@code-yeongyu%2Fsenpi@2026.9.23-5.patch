@@ -834,3 +834,17 @@ diff --git a/node_modules/@code-yeongyu/senpi-codemode/src/kernels/js/display-im
  	if (isMarshalledToolResult(value)) {
  		const frames = value.images.map((image) => frame(image.mimeType, image.dataBase64));
  		return value.text === "" ? frames : [{ kind: "text", text: value.text }, ...frames];
+diff --git a/dist/modes/rpc/host-ensure.js b/dist/modes/rpc/host-ensure.js
+--- a/dist/modes/rpc/host-ensure.js
++++ b/dist/modes/rpc/host-ensure.js
+@@ -24,7 +24,9 @@
+ export { probeHost } from "./host-probe.js";
+ const SPAWNED_HOST_PROBE_TIMEOUT_MS = 10_000;
+ const EXISTING_HOST_PROBE_TIMEOUT_MS = 10_000;
+-const DEFAULT_READINESS_TIMEOUT_MS = 10_000;
++// omo-mini: a Mini host loads the full OmO plugin before it answers on its socket, and a cold
++// start on a slow Windows machine can pass 10s. The profile waits longer before giving up.
++const DEFAULT_READINESS_TIMEOUT_MS = process.env.OMO_MINI_LOCAL_PROFILE === "1" ? 30_000 : 10_000;
+ const DEFAULT_STOP_TIMEOUT_MS = 10_000;
+ const SIGKILL_GRACE_MS = 2_000;
+ /**
