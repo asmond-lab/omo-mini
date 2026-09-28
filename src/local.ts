@@ -1,6 +1,9 @@
 import { z } from "zod";
 import type { Model } from "@earendil-works/pi-ai";
 
+// Keep in sync with package.json "version".
+export const MINI_IDENTITY = "omo-mini 0.2.2";
+
 export class MiniError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = "MiniError"; }
 }
@@ -19,6 +22,12 @@ export function chooseModel(models: readonly LocalModel[], requested?: string): 
     if (!match) throw new MiniError("model_unavailable", `Model ${requested} is not loaded and tool-capable`);
     return match;
   }
+  if (eligible.length === 0) {
+    const message = models.some(model => model.state === "loaded")
+      ? "No loaded model provides tool_use and loaded_context_length. Load a tool-capable chat model in LM Studio and check its reported capabilities and context length."
+      : "No model is loaded in LM Studio. Load a tool-capable chat model in LM Studio, then run omo-mini again.";
+    throw new MiniError("model_selection", message);
+  }
   if (eligible.length !== 1) throw new MiniError("model_selection", `Expected exactly one loaded tool-capable model, found ${eligible.length}; use --model`);
   const selected = eligible[0];
   if (!selected) throw new MiniError("model_selection", "No loaded tool-capable model");
@@ -34,13 +43,20 @@ export function endpoint(baseUrl: string): URL {
   return url;
 }
 
-export async function discover(baseUrl: string, requested?: string, signal?: AbortSignal): Promise<LocalModel> {
+export async function discoverLoaded(baseUrl: string, requested?: string, signal?: AbortSignal): Promise<LocalModel> {
   const url = endpoint(baseUrl);
   const response = await fetch(url, { signal: signal ?? AbortSignal.timeout(5000) });
   if (!response.ok) throw new MiniError("endpoint", `Model listing returned HTTP ${response.status}`);
   const body = listing.safeParse(await response.json());
   if (!body.success) throw new MiniError("endpoint", "Malformed model listing");
   return chooseModel(body.data.data, requested);
+}
+
+/** Legacy launch paths intentionally select only existing inference instances. */
+export const discover = discoverLoaded;
+
+export function outputLimit(contextWindow: number): number {
+  return Math.max(1, Math.min(8192, Math.floor(contextWindow / 4), contextWindow - 3072));
 }
 
 export function sdkModel(selected: LocalModel, baseUrl: string): Model<"openai-completions"> {
@@ -50,12 +66,12 @@ export function sdkModel(selected: LocalModel, baseUrl: string): Model<"openai-c
     id: selected.id, name: selected.id, api: "openai-completions", provider: "local",
     baseUrl: new URL("/v1", baseUrl).href, reasoning: false, input: selected.type === "vlm" ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: context, maxTokens: Math.min(2048, Math.max(1, context - 3072)),
+    contextWindow: context, maxTokens: outputLimit(context),
   };
 }
 
 /** Conservative text-byte proxy plus a tile-based image-token estimate, not exact provider tokenization. */
-export function checkBudget(request: unknown, contextWindow: number, outputReserve = 2560): number {
+export function checkBudget(request: unknown, contextWindow: number, outputReserve = outputLimit(contextWindow) + 512): number {
   let imageCost = 0;
   const serialized = JSON.stringify(request, (key, value: unknown) => {
     if (key === "data" && typeof value === "string" && value.length > 32 && value.startsWith("iVBORw0KGgo")) {

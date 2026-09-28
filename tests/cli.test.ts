@@ -13,12 +13,15 @@ test("real CLI JSON over-context fails before inference", async () => {
   let inference = 0;
   let discoveries = 0;
   const server = Bun.serve({ port: 0, fetch(request) {
-    if (new URL(request.url).pathname === "/api/v0/models") { discoveries++; return Response.json({ data: [model] }); }
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/models") { discoveries++; return Response.json({ models: [{ key: model.id, type: "llm",
+      capabilities: { trained_for_tool_use: true, vision: false }, loaded_instances: [{ id: model.id, config: { context_length: model.loaded_context_length } }] }] }); }
+    if (path !== "/v1/chat/completions") return new Response("Not Found", { status: 404 });
     inference++;
     return new Response("unexpected inference", { status: 500 });
   } });
   try {
-    const proc = Bun.spawn([process.execPath, "src/cli.ts", "run", "--root", root, "--task", "x".repeat(3000), "--base-url", `http://127.0.0.1:${server.port}/v1`, "--json"],
+    const proc = Bun.spawn([process.execPath, "src/cli.ts", "run", "--root", root, "--state-dir", join(root, "state"), "--task", "x".repeat(3000), "--base-url", `http://127.0.0.1:${server.port}/v1`, "--json"],
       { cwd: resolve(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
     // Windows CI cold startup can exceed Bun's default 5s test limit. Bound the
     // integration itself and report whether model discovery happened on deadline.

@@ -6,7 +6,10 @@ import { join } from "node:path";
 test("native OmO JSONL reports length, empty and provider error without a silent success", async () => {
   let finish = "length";
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
-    if (new URL(request.url).pathname === "/api/v0/models") return Response.json({ data: [{ id: "fixture", state: "loaded", type: "llm", loaded_context_length: 200000, capabilities: ["tool_use"] }] });
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/models") return Response.json({ models: [{ key: "fixture", type: "llm",
+      capabilities: { trained_for_tool_use: true, vision: false }, loaded_instances: [{ id: "fixture", config: { context_length: 200000 } }] }] });
+    if (path !== "/v1/chat/completions") return new Response("Not Found", { status: 404 });
     if (finish === "error") return new Response("provider unavailable", { status: 503 });
     const content = finish === "length" ? "Partial text" : "";
     return new Response(`data: ${JSON.stringify({ id: "one", object: "chat.completion.chunk", choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "one", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: finish }] })}\n\ndata: [DONE]\n\n`,

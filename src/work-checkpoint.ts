@@ -3,6 +3,8 @@ import type { ExtensionAPI } from "@code-yeongyu/senpi";
 // Session-only recovery for native compaction's deterministic fallback, which can
 // discard goal/todo actions and their observed results when summarization fails.
 const ENTRY = "omo-mini.work-checkpoint";
+const FALLBACK_SCHEMA = "senpi.compaction.deterministic-fallback.v1";
+const FALLBACK_MARKER = "[Deterministic compaction recovery checkpoint]";
 type Observation = { id: string; tool: string; result: string };
 type Work = { version: 1; root: string; goal?: string; blocker?: string; todo?: string; observed?: Observation[] };
 type StoredWork = Omit<Work, "observed"> & { observed?: Observation[] | Observation };
@@ -32,6 +34,8 @@ export function registerWorkCheckpoint(pi: ExtensionAPI, root: string) {
   let rootFailure: string | undefined;
   let invalidEntryId: string | undefined;
   let warnedEntryId: string | undefined;
+  let pendingRecoveryId: string | undefined;
+  let deliveredRecoveryId: string | undefined;
   const restore = (ctx: SessionContext) => {
     current = { version: 1, root };
     failure = undefined;
@@ -54,8 +58,12 @@ export function registerWorkCheckpoint(pi: ExtensionAPI, root: string) {
       };
     }
   };
-  pi.on("session_start", (_event, ctx) => restore(ctx));
-  pi.on("session_tree", (_event, ctx) => restore(ctx));
+  pi.on("session_start", (_event, ctx) => { pendingRecoveryId = undefined; deliveredRecoveryId = undefined; restore(ctx); });
+  pi.on("session_tree", (_event, ctx) => { pendingRecoveryId = undefined; deliveredRecoveryId = undefined; restore(ctx); });
+  pi.on("session_compact", event => {
+    if (event.accepted && event.reason === "overflow" && event.willRetry) pendingRecoveryId = event.compactionEntry.id;
+  });
+  pi.on("input", event => { if (event.source !== "extension") pendingRecoveryId = undefined; });
   pi.on("tool_result", event => {
     if (event.isError) return;
     if (event.toolName === "create_goal" && typeof event.input["objective"] === "string") current.goal = short(event.input["objective"], 512);
@@ -78,5 +86,18 @@ export function registerWorkCheckpoint(pi: ExtensionAPI, root: string) {
     return current.goal || current.todo || current.observed
       ? `\n\n<session_work_checkpoint>\n${JSON.stringify(current)}\nOnly observed tool results with call IDs are execution evidence; goal/todo are plans. Resume the next open todo.\n</session_work_checkpoint>` : "";
   };
-  return { projection, rootFailure: () => rootFailure };
+  const recovery = (ctx: SessionContext & { ui: { notify(message: string, level: "warning"): void } },
+    compaction: { id: string; summary: string; details?: unknown }, latestContent: unknown, nativeContent: unknown): string | undefined => {
+    if (pendingRecoveryId !== compaction.id || deliveredRecoveryId === compaction.id ||
+        !Array.isArray(nativeContent) || JSON.stringify(latestContent) !== JSON.stringify(nativeContent) ||
+        !compaction.summary.includes(FALLBACK_MARKER) || compaction.details === null ||
+        typeof compaction.details !== "object" ||
+        !("schema" in compaction.details) || compaction.details.schema !== FALLBACK_SCHEMA) return;
+    const observed = projection(ctx); // Same session-owned, root-validated checkpoint used on resume.
+    pendingRecoveryId = undefined;
+    deliveredRecoveryId = compaction.id;
+    if (failure || rootFailure || !current.observed?.length) return;
+    return observed;
+  };
+  return { projection, recovery, rootFailure: () => rootFailure };
 }

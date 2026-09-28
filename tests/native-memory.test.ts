@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { appendFile, mkdtemp, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs, prepareProfile } from "../src/profile.ts";
 
-type Frame = { type: string; id?: string; success?: boolean; data?: { disposition?: string; sessionFile?: string; summary?: string }; method?: string; message?: string; toolName?: string; toolCallId?: string; isError?: boolean; willRetry?: boolean };
+type Frame = { type: string; id?: string; success?: boolean; data?: { disposition?: string; sessionFile?: string; summary?: string; model?: unknown; contextUsage?: unknown }; method?: string; title?: string; options?: string[]; message?: string; toolName?: string; toolCallId?: string; isError?: boolean; willRetry?: boolean };
 type Wire = { messages: { role: string; content?: unknown; tool_calls?: { id: string; function: { name: string } }[]; tool_call_id?: string }[]; tools?: { function: { name: string } }[] };
 const model = "native-memory-local";
 const fact = "PUBLIC-APPROVED-CEDAR-741";
@@ -18,12 +18,21 @@ test("native committed memory, goal/todo and verified work survive compaction an
   const base = await mkdtemp(join(tmpdir(), "omo-mini-native-memory-"));
   const state = join(base, "state"), a = join(base, "project-a"), b = join(base, "project-b");
   await Promise.all([mkdir(a), mkdir(b)]);
+  for (const project of [a, b]) {
+    await mkdir(join(project, ".omo"));
+    await writeFile(join(project, ".omo", "omo.json"), JSON.stringify({ memory: {
+      reflection: { enabled: false }, facts: { enabled: false }, dream: { enabled: false }, recall: { enabled: false },
+    } }));
+  }
   await Bun.write(join(a, "public.txt"), "PUBLIC-RESULT-831\n");
   const requests: Wire[] = []; const capturedFrames: Frame[] = [], unknownPaths: string[] = []; let callId = 0;
   const sequence = new Map<string, number>();
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     const path = new URL(request.url).pathname;
     if (path === "/api/v0/models") return Response.json({ data: [{ id: model, state: "loaded", type: "llm", loaded_context_length: 69376, capabilities: ["tool_use"] }] });
+    if (path === "/api/v1/models") return Response.json({ models: [{ key: model, type: "llm", max_context_length: 131072,
+      capabilities: { trained_for_tool_use: true, vision: false },
+      loaded_instances: [{ id: model, config: { context_length: 69376 } }] }] });
     if (path !== "/v1/chat/completions") { unknownPaths.push(path); return new Response("not found", { status: 404 }); }
     const wire = await request.json() as Wire; requests.push(wire);
     const history = JSON.stringify(wire.messages);
@@ -35,12 +44,16 @@ test("native committed memory, goal/todo and verified work survive compaction an
     if (!summarizing && key === "fact" && step === 0) delta = tool("memory", { command: "create", reason: "User approved project fact", file_path: "system/project.md", description: "Approved public project identifier", file_text: fact }, ++callId);
     if (!summarizing && key === "forget" && step === 0) delta = tool("memory", { command: "delete", reason: "User explicitly requested forget", file_path: "system/project.md" }, ++callId);
     if (!summarizing && key === "guard") {
-      const fail = { command: `bun -e "require('fs').appendFileSync('failed.txt','x');process.exit(49)"` };
+      // Native exposes bash inside eval when codemode is enabled; a direct bash
+      // call is a routing hint, not an executed shell action.
+      const command = `bun -e "require('fs').appendFileSync('failed.txt','x');process.exit(49)"`;
+      const fail = { language: "js", code: `display(await tool.bash({ command: ${JSON.stringify(command)} }));`,
+        summary: "Run the fixture shell action through Native eval" };
       const steps = [
-        () => tool("bash", fail, ++callId),
+        () => tool("eval", fail, ++callId),
         () => tool("todo", { op: "view" }, ++callId),
         () => tool("memory", { command: "create", reason: "Approved guard fixture fact", file_path: "external/guard.md", description: "Public fixture", file_text: "GUARD-APPROVED" }, ++callId),
-        () => tool("bash", fail, ++callId),
+        () => tool("eval", fail, ++callId),
       ];
       if (step < steps.length) delta = steps[step]!();
     }
@@ -64,7 +77,12 @@ test("native committed memory, goal/todo and verified work survive compaction an
     child.stdout.on("data", (chunk: Buffer) => {
       buffer += chunk.toString(); let index;
       while ((index = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-        if (line.startsWith("{")) { const frame = JSON.parse(line) as Frame; frames.push(frame); capturedFrames.push(frame); for (const listener of listeners) listener(frame); }
+        if (line.startsWith("{")) { const frame = JSON.parse(line) as Frame; frames.push(frame); capturedFrames.push(frame);
+          if (frame.type === "extension_ui_request" && frame.method === "select" && /^Permission required: (?:eval|bash)\n/.test(frame.title ?? "")) {
+            expect(frame.options).toContain("Allow once");
+            child.stdin.write(JSON.stringify({ type: "extension_ui_response", id: frame.id, value: "Allow once" }) + "\n");
+          }
+          for (const listener of listeners) listener(frame); }
       }
     });
     const wait = (match: (frame: Frame) => boolean) => new Promise<Frame>((accept, reject) => {
@@ -94,15 +112,31 @@ test("native committed memory, goal/todo and verified work survive compaction an
   try {
     const init = await rpc.send("prompt", { message: "/memfs init" }); expect(init.data?.disposition).toBe("handled");
     expect(rpc.frames.some(frame => frame.method === "notify" && frame.message?.includes("initialized memory repository"))).toBe(true);
-    await rpc.send("prompt", { message: "/memfs status" });
-    expect(rpc.frames.some(frame => frame.message?.includes("Mirror: not configured"))).toBe(true);
     const identity = (await readdir(join(state, "memory", "agents")))[0]!;
     const repo = join(state, "memory", "agents", identity, "repo");
+    const skillDirectory = join(repo, "skills", "windows-ps-script");
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(join(skillDirectory, "SKILL.md"), "---\nname: windows-ps-script\ndescription: Run fixture PowerShell scripts on Windows\n---\n\nRead this skill before a PowerShell script task.\n");
+    execFileSync("git", ["-C", repo, "add", "skills/windows-ps-script/SKILL.md"]);
+    execFileSync("git", ["-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "Add fixture skill"]);
+    await rpc.close(); rpc = start(a);
+    await rpc.send("prompt", { message: "/memfs status" });
+    expect(rpc.frames.some(frame => frame.message?.includes("Mirror: not configured"))).toBe(true);
     expect(execFileSync("git", ["-C", repo, "remote", "-v"], { encoding: "utf8" })).toBe("");
     // Even a manually added remote cannot turn locally committed memory into a push.
     execFileSync("git", ["-C", repo, "remote", "add", "origin", `http://127.0.0.1:${server.port}/forbidden-git-remote`]);
-    const saved = (await rpc.send("get_state")).data?.sessionFile; expect(saved).toBeTruthy();
+    const liveState = (await rpc.send("get_state")).data;
+    const saved = liveState?.sessionFile; expect(saved).toBeTruthy();
+    expect(liveState?.["model"]).toMatchObject({ provider: "omo-mini-local", id: model, contextWindow: 69376 });
+    expect(liveState?.["contextUsage"]).toMatchObject({ contextWindow: 69376 });
     await rpc.send("prompt", { message: `Approved fact for this project only: ${fact}. Save it as durable memory.` }, true);
+    const firstPrompt = String(requests[0]?.messages[0]?.content);
+    expect(firstPrompt).toContain("<name>windows-ps-script</name>");
+    expect(firstPrompt).toContain("<description>Run fixture PowerShell scripts on Windows</description>");
+    const skillRoot = firstPrompt.match(/<r(\d+)>([^<]+)<\/r\1>/g)?.find(root => root.includes(join(repo, "skills").replaceAll("\\", "/")));
+    expect(skillRoot).toBeTruthy();
+    const alias = /<r(\d+)>/.exec(skillRoot!)?.[1];
+    expect(firstPrompt).toContain(`<location>r${alias}/windows-ps-script/SKILL.md</location>`);
     expect((await readFile(join(repo, "system", "project.md"), "utf8"))).toContain(fact);
     const committedMemory = await readFile(join(repo, "system", "project.md"), "utf8");
     const committedHead = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -112,6 +146,10 @@ test("native committed memory, goal/todo and verified work survive compaction an
     await rpc.send("prompt", { message: "Guard interaction: execute the failing action, inspect todo, commit the approved guard fixture fact, and attempt the identical failing action." }, true);
     expect(await readFile(join(a, "failed.txt"), "utf8")).toBe("x");
     const guardWire = requests.at(-1)!.messages;
+    const evalCalls = guardWire.flatMap(item => item.tool_calls?.filter(call => call.function.name === "eval") ?? []);
+    expect(evalCalls).toHaveLength(2);
+    const firstResult = guardWire.find(item => item.role === "tool" && item.tool_call_id === evalCalls[0]?.id);
+    expect(JSON.stringify(firstResult?.content)).toMatch(/(?:exit(?:ed)?(?:\s+with)?\s*(?:code|status)|exitCode|status)\D*49/i);
     expect(guardWire.filter(item => item.role === "tool").map(item => item.tool_call_id))
       .toEqual(guardWire.flatMap(item => item.tool_calls?.map(call => call.id) ?? []));
     expect(JSON.stringify(guardWire)).toContain("Repeated failed tool action blocked before execution");
@@ -182,12 +220,17 @@ test("native committed memory, goal/todo and verified work survive compaction an
     await Bun.write(join(c, ".omo", "omo.json"), JSON.stringify({ memory: { enabled: true, sync: { enabled: false } }, categories: {} }));
     expect((await prepareProfile(configOptions)).root).toBe(c);
     expect(unknownPaths).toEqual([]);
-    expect(requests[0]!.tools?.map(item => item.function.name)).toEqual(["read", "grep", "find", "ls", "bash", "powershell", "edit", "write", "memory", "create_goal", "update_goal", "get_goal", "todo"]);
-    expect(Buffer.byteLength(String(requests[0]!.messages[0]?.content))).toBeLessThan(8000);
+    const exposedTools = new Set(requests[0]!.tools?.map(item => item.function.name));
+    for (const name of ["read", "edit", "write", "memory", "create_goal", "update_goal", "get_goal", "todo", "eval", "task", "lsp_diagnostics"])
+      expect(exposedTools.has(name)).toBe(true);
+    for (const name of ["ls", "find"]) expect(exposedTools.has(name)).toBe(true);
+    for (const name of ["grep", "bash", "powershell"])
+      expect(exposedTools.has(name)).toBe(false); // Eval-only tools must not be exposed as direct calls.
+    // Keep the full Native skill/memory catalog; byte size is a receipt, not a token admission limit.
     if (process.env["OMO_MEMORY_EVIDENCE_DIR"]) {
       const directory = process.env["OMO_MEMORY_EVIDENCE_DIR"];
       await Promise.all([
-        Bun.write(join(directory, "native-memory-wire.json"), JSON.stringify({ identity, config: JSON.parse(await readFile(join(state, "home", ".omo", "omo.json"), "utf8")), tools: requests[0]?.tools?.map(item => item.function.name), systemPromptBytes: Buffer.byteLength(String(requests[0]?.messages[0]?.content)), requestCount: requests.length, selectedSession: saved, compactionSummary: compact.data?.summary, workPairs: worked.messages.filter(item => item.role === "tool").map(item => item.tool_call_id), resumedIncludesResult: resumed.includes("PUBLIC-RESULT-831"), newIncludesFact: newWire.includes(fact), otherProjectIsolated: !other.includes(fact), unknownPaths }, null, 2)),
+        Bun.write(join(directory, "native-memory-wire.json"), JSON.stringify({ identity, config: JSON.parse(await readFile(join(state, "home", ".omo", "omo.json"), "utf8")), tools: requests[0]?.tools?.map(item => item.function.name), systemPromptBytes: Buffer.byteLength(String(requests[0]?.messages[0]?.content)), firstRequestBytes: Buffer.byteLength(JSON.stringify(requests[0])), contextUsage: liveState?.["contextUsage"], requestCount: requests.length, selectedSession: saved, compactionSummary: compact.data?.summary, workPairs: worked.messages.filter(item => item.role === "tool").map(item => item.tool_call_id), resumedIncludesResult: resumed.includes("PUBLIC-RESULT-831"), newIncludesFact: newWire.includes(fact), otherProjectIsolated: !other.includes(fact), unknownPaths }, null, 2)),
         Bun.write(join(directory, "native-memory-raw-wire.json"), JSON.stringify(requests, null, 2)),
         Bun.write(join(directory, "native-memory-rpc.json"), JSON.stringify(capturedFrames, null, 2)),
         Bun.write(join(directory, "native-memory-repository.json"), JSON.stringify({ identity, committedHead, committedMemory, finalHead: execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(), remotes: execFileSync("git", ["-C", repo, "remote", "-v"], { encoding: "utf8" }), projectBIdentity: identityB, unknownPaths }, null, 2)),
