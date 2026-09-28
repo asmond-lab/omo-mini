@@ -1,0 +1,1 @@
+Toy disposable project. Run `bun test public.test.ts` to reproduce the failing checks. Repair only the module named in the task. No network target except an optional loopback HTTP server; no real secrets. Files outside this workspace are off limits.
